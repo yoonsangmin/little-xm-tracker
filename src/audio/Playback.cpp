@@ -268,8 +268,48 @@ public:
     void timerHandler(mp_sint32) override {}
 };
 
+struct DraftSample {
+    struct FreePcm {
+        void operator()(mp_ubyte* pcm) const { TXMSample::freePaddedMem(pcm); }
+    };
+    std::unique_ptr<mp_ubyte, FreePcm> pcm;
+    TXMSample sample{};
+
+    explicit DraftSample(const Sample& source) {
+        if (source.pcm.size() > 32u * 1024u * 1024u || source.volume > 64 || source.loopType > 3)
+            throw std::invalid_argument("Invalid draft sample size, volume or loop type");
+        if (source.loopType && (!source.loopLength || source.loopStart >= source.pcm.size() ||
+            std::uint64_t(source.loopStart) + source.loopLength > source.pcm.size()))
+            throw std::invalid_argument("Draft sample loop is outside PCM data");
+        if (!source.sixteenBit && (source.reserved == 0xAD ||
+            std::any_of(source.pcm.begin(), source.pcm.end(), [](auto value) { return value % 256 != 0; })))
+            throw std::invalid_argument("Draft sample does not contain canonical eight-bit PCM");
+        sample.samplen = static_cast<mp_uint32>(source.pcm.size());
+        sample.loopstart = source.loopStart;
+        sample.looplen = source.loopLength;
+        // LoaderXM treats the preserved XM loop value 3 as ping-pong.
+        sample.type = (source.loopType == 3 ? 2 : source.loopType) | (source.sixteenBit ? 16 : 0);
+        sample.vol = XModule::vol64to255(source.volume);
+        sample.pan = source.panning;
+        sample.relnote = source.relativeNote;
+        sample.finetune = source.finetune;
+        if (!sample.samplen) return;
+        pcm.reset(TXMSample::allocPaddedMem(sample.samplen * (source.sixteenBit ? 2u : 1u)));
+        if (!pcm) throw std::bad_alloc();
+        sample.sample = reinterpret_cast<mp_sbyte*>(pcm.get());
+        if (source.sixteenBit) std::memcpy(pcm.get(), source.pcm.data(), source.pcm.size() * sizeof(std::int16_t));
+        else for (std::size_t n = 0; n < source.pcm.size(); ++n)
+            sample.sample[n] = static_cast<mp_sbyte>(source.pcm[n] / 256);
+        // Use the same interpolation padding and loop-end copy as LoaderXM.
+        // Both the sample and guard bytes are private to this audition.
+        sample.postProcessSamples();
+    }
+};
+
 struct Core {
     XModule module;
+    // Declared before the mixer so its PCM outlives all mixer destruction.
+    std::unique_ptr<DraftSample> sampleDraft;
     CorePlayer song;
     CorePlayer audition;
     SampleMixer sample;
@@ -564,6 +604,7 @@ struct Playback::Impl {
             core->song.clearMonitorNotes();
             core->audition.stopAudition();
             core->sample.resetChannelsFull();
+            core->sampleDraft.reset();
             core->reclaimRetired();
         }
         bufferedOffset = blockFrames;
@@ -911,6 +952,11 @@ void Playback::previewSample(int instrumentOneBased, int sampleIndex, int noteXm
     const auto rangeEnd = end < 0 ? sampleLength : end;
     if (start < 0 || start >= rangeEnd || rangeEnd > sampleLength)
         throw std::out_of_range("Sample preview range");
+    if (core.sampleDraft) {
+        core.sample.resetChannelsFull();
+        core.sampleDraft.reset();
+        if (!core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
+    }
     const double semitones = noteXm - 49 + sample.relnote + sample.finetune / 128.0;
     const int frequency = static_cast<int>(std::clamp(8363.0 * std::exp2(semitones / 12.0), 1.0, 384000.0));
     core.sample.setFreq(0, frequency);
@@ -925,11 +971,41 @@ void Playback::previewSample(int instrumentOneBased, int sampleIndex, int noteXm
     core.sample.playSample(0, sample.sample, sampleLength, start, 0, false, loopStart, loopEnd, flags);
 }
 
+void Playback::previewSample(const Sample& source, int noteXm) {
+    validateNote(noteXm);
+    // Allocation, copying and interpolation guards are prepared on the caller
+    // thread, before the device lock, without borrowing the caller's PCM.
+    auto replacement = std::make_unique<DraftSample>(source);
+    {
+        DeviceLock lock(impl_->device, impl_->stateMutex);
+        auto& core = impl_->requireCore();
+        core.sample.resetChannelsFull();
+        core.sampleDraft.swap(replacement);
+        const auto& sample = core.sampleDraft->sample;
+        if (sample.samplen) {
+            const double semitones = noteXm - 49 + sample.relnote + sample.finetune / 128.0;
+            const int frequency = static_cast<int>(std::clamp(8363.0 * std::exp2(semitones / 12.0), 1.0, 384000.0));
+            core.sample.setFreq(0, frequency);
+            core.sample.setVol(0, (sample.vol * 512) / 255);
+            core.sample.setPan(0, sample.pan);
+            const int flags = ((sample.type & 16) ? 4 : 0) | (sample.type & 3);
+            const int loopStart = flags & 3 ? sample.loopstart : 0;
+            const int loopEnd = flags & 3 ? sample.loopstart + sample.looplen : sample.samplen;
+            core.sample.playSample(0, sample.sample, sample.samplen, 0, 0, false, loopStart, loopEnd, flags);
+        }
+        // Replace stale preview PCM immediately while stopped. An in-flight
+        // song block must finish normally to retain its transport continuity.
+        if (!core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
+    }
+    // The retired snapshot is released after the mixer no longer references it.
+}
+
 void Playback::stopPreview() {
     DeviceLock lock(impl_->device, impl_->stateMutex);
     if (!impl_->core) return;
     impl_->core->audition.stopAudition();
     impl_->core->sample.resetChannelsFull();
+    impl_->core->sampleDraft.reset();
     if (impl_->core->song.isRowAudition()) {
         impl_->core->song.setIdle(true);
         impl_->core->song.resetChannelsFull();

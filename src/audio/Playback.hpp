@@ -11,6 +11,7 @@ namespace brick {
 
 struct Document;
 struct Cell;
+struct Sample;
 
 struct PlaybackStatus {
     bool playing = false;
@@ -106,6 +107,10 @@ public:
     void previewRow(int pattern, int row, int overrideChannel = -1, const Cell* overrideCell = nullptr);
     void previewSample(int instrumentOneBased, int sampleIndex,
                        int noteXm = 49, int start = 0, int end = -1);
+    // Audition an owned snapshot of unsaved PCM without inserting a sample or
+    // changing the loaded document. Refresh restarts this raw preview; loops,
+    // tuning, volume and panning match the committed sample preview path.
+    void previewSample(const Sample& sample, int noteXm = 49);
     void stopPreview();
     // Solo replaces the current mask with all channels except this one muted.
     // -1 clears every mute. The UI toggles an already-selected Solo with -1.

@@ -4,6 +4,7 @@
 #include "model/EditOperations.hpp"
 #include "model/SampleAnalysis.hpp"
 #include "model/SampleChop.hpp"
+#include "model/SampleTools.hpp"
 
 #include <SDL.h>
 #include <algorithm>
@@ -64,6 +65,113 @@ std::array<float, 2> stereoPeaks(const std::vector<std::int16_t>& pcm) {
 
 bool emptyMeter(const brick::OutputMeter& meter) {
     return meter.peak == std::array<float, 2>{} && meter.clipped == std::array<bool, 2>{};
+}
+
+void draftSampleAudition() {
+    using namespace brick;
+    const auto original = fixture();
+    const auto originalBytes = io::encodeXm(original);
+    for (const auto interpolation : {Interpolation::Nearest, Interpolation::Linear,
+         Interpolation::CubicLagrange, Interpolation::CubicSpline, Interpolation::Sinc, Interpolation::SincPrecise}) {
+        for (const bool sixteenBit : {false, true}) for (const int loop : {0, 1, 2, 3}) {
+            auto committed = original;
+            auto& sample = committed.instruments[0].samples[0];
+            sample.sixteenBit = sixteenBit;
+            if (!sixteenBit) for (auto& value : sample.pcm) value = (value / 256) * 256;
+            sample.loopType = loop;
+            sample.loopStart = 7;
+            sample.loopLength = 53;
+            sample.relativeNote = -5;
+            sample.finetune = 39;
+            sample.volume = 43;
+            sample.panning = 29;
+            Playback draft({48000, interpolation}), saved({48000, interpolation});
+            auto empty = original;empty.instruments.clear();
+            draft.load(empty);saved.load(committed);
+            draft.previewSample(sample, 54);saved.previewSample(1, 0, 54);
+            const auto expected = read(saved, 6000);
+            require(audible(expected) && read(draft, 6000) == expected,
+                    "Draft PCM must match saved sample audition at every interpolation, depth and loop mode");
+            require(!draft.status().playing && draft.status().elapsedSeconds == 0,
+                    "Draft sample audition must not start transport or advance song time");
+        }
+    }
+
+    Playback player, reference;
+    player.load(original);reference.load(original);
+    auto source = original.instruments[0].samples[0];
+    player.previewSample(source);reference.previewSample(source);
+    source.pcm.assign(2, 0);source.loopLength=2;
+    require(read(player, 901) == read(reference, 901), "Draft audition owns PCM after the caller replaces its vector");
+    {
+        auto temporary = original.instruments[0].samples[0];
+        player.previewSample(temporary);reference.previewSample(temporary);
+    }
+    require(read(player, 913) == read(reference, 913), "Temporary sample destruction cannot invalidate draft audition");
+    source = original.instruments[0].samples[0];
+    player.previewSample(source);reference.previewSample(source);
+    read(player, 1);read(reference, 1);
+    auto invalid = source;invalid.loopStart=std::uint32_t(invalid.pcm.size());
+    bool rejected=false;
+    try { player.previewSample(invalid); } catch (const std::exception&) { rejected=true; }
+    require(rejected && read(player, 177) == read(reference, 177),
+            "Invalid draft loop must leave the currently sounding preview intact");
+    invalid=source;invalid.sixteenBit=false;invalid.pcm[0]=1;rejected=false;
+    try { player.previewSample(invalid); } catch (const std::exception&) { rejected=true; }
+    require(rejected && read(player, 91) == read(reference, 91),
+            "Noncanonical eight-bit draft rejection must preserve the current preview");
+
+    auto cleared=source;std::fill(cleared.pcm.begin(),cleared.pcm.end(),0);
+    player.previewSample(cleared);
+    require(!audible(read(player, 19)), "Cleared draft must immediately replace the old buffered tone with silence");
+    player.previewSample(source);
+    require(audible(read(player, 411)), "Editing after clear must restart the updated draft tone");
+    player.stopPreview();
+    require(!audible(read(player, 43)), "Stopping draft audition must silence the next pull immediately");
+    player.previewSample(source);read(player, 1);player.previewSample(Sample{});
+    require(!audible(read(player, 43)), "An empty draft must safely silence a previous raw preview");
+
+    // Returning to a document-owned sample must release the draft only after
+    // resetting its voice; the new output is still the ordinary sample path.
+    player.previewSample(source);read(player, 777);player.previewSample(1, 1);
+    reference.load(original);reference.previewSample(1, 1);
+    require(read(player, 1800)==read(reference,1800), "Committed audition safely replaces a sounding draft snapshot");
+    player.previewSample(source);player.stop();
+    require(!audible(read(player,17)), "Stop releases draft voices and their pending PCM");
+    player.previewSample(source);player.load(original);
+    require(!audible(read(player,17)), "Loading a document releases all old draft audio");
+    player.previewSample(source);player.configure({44100,Interpolation::CubicSpline});
+    require(!audible(read(player,17)), "Reconfiguring output discards the old draft voice safely");
+    player.previewSample(source);require(audible(read(player,1000)), "Draft audition restarts with the configured output rate");
+    require(io::encodeXm(original)==originalBytes,
+            "Preparing and playing draft snapshots must not edit any original document sample");
+
+    // Full-length chip noise and tiny imported loops exercise both sides of
+    // the upstream interpolation guards without requiring a saved slot.
+    player.configure({48000,Interpolation::SincPrecise});
+    for (const int length : {1,2,3,127,32767}) {
+        Sample sample;sample.sixteenBit=false;sample.loopType=1;sample.loopLength=length;
+        sample.pcm.assign(std::size_t(length),4096);
+        if (length>=127) edit::fillNoisePreset(sample,{0,sample.pcm.size()},
+            length==127?edit::NoisePreset::Short:edit::NoisePreset::Long);
+        player.previewSample(sample);
+        require(audible(read(player,8000)), "Tiny loops and full chip noise periods must both audition with sinc guards");
+    }
+
+    auto song=original;song.patterns[0].cells[0]={49,1,0x50,0,0};
+    player.configure({});player.load(song);reference.load(song);player.playSong();reference.playSong();
+    read(player,13);read(reference,13);
+    const auto before=player.status();player.previewSample(source);
+    require(player.status().elapsedSeconds==before.elapsedSeconds && player.status().row==before.row,
+            "Starting a draft must not move a running song's transport");
+    read(player,73);read(reference,73);player.previewSample(cleared);
+    const auto quietSong=read(player,510), plainSong=read(reference,510);
+    constexpr auto packetSamples=(Playback::sampleRate/250)*2;
+    require(std::equal(quietSong.begin()+packetSamples,quietSong.end(),plainSong.begin()+packetSamples),
+            "Refreshing a draft must preserve the buffered song timing after the current mixer packet");
+    require(player.status().elapsedSeconds==reference.status().elapsedSeconds &&
+            player.updateDocument(song)==DocumentUpdateResult::Preserved,
+            "Draft audition must retain song timing and the document's live-update shape");
 }
 
 void outputMeter() {
@@ -958,6 +1066,7 @@ void wavAndSdl() {
 int main() {
     try {
         playbackAndAudition();
+        draftSampleAudition();
         outputMeter();
         outputMeterClipping();
         defaultMixerHeadroom();

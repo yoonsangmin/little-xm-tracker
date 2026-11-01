@@ -32,8 +32,23 @@ enum class WavePreset { Sine, Triangle, Square, Saw, Noise };
 // Fill one period (or deterministic noise) into a half-open selection. PCM
 // outside the range and every metadata field are retained. This is a one-time
 // PCM edit, not a synthesizer or a voice running in the playback engine.
+// Square duty is 1/2/4/6 eighths. For sine/triangle/saw, levels=16 quantizes
+// normalized amplitude before output-depth conversion; 256 keeps the normal
+// output resolution. The 16-level limit is a ceiling, not a promise that a
+// short waveform visits every possible value. Duty/levels do not affect Noise.
 void fillWavePreset(Sample& sample, FrameRange range, WavePreset preset,
-                    int amplitude = 16384, std::uint32_t noiseSeed = 0x6d2b79f5u);
+                    int amplitude = 16384, std::uint32_t noiseSeed = 0x6d2b79f5u,
+                    int dutyEighths = 4, int levels = 256);
+
+enum class NoisePreset { Short, Long };
+// One complete period of a 7-bit or 15-bit maximal-length shift register.
+// These bit counts describe the sequence, not the PCM storage depth.
+std::size_t noisePresetFrames(NoisePreset preset);
+// Fill exactly one complete noise period. Reject truncated periods so a
+// forward loop retains the intended short/long repetition character.
+// Outside PCM, sample bit depth and all metadata are left unchanged.
+void fillNoisePreset(Sample& sample, FrameRange range, NoisePreset preset,
+                     int amplitude = 16384);
 
 // Whole-sample delay taps. Each echo retains decayPercent of the previous
 // tap's level. repeats is 0..64, decayPercent is 0..100, delay is in PCM frames.

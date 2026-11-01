@@ -13,6 +13,7 @@
 #include "model/Cleanup.hpp"
 #include "model/TrackerExtras.hpp"
 #include "model/SampleTools.hpp"
+#include "model/WaveSynth.hpp"
 #include "model/SampleAnalysis.hpp"
 #include "model/SampleChop.hpp"
 #include "model/EnvelopePresets.hpp"
@@ -503,7 +504,7 @@ struct TrackerApp::Impl {
     void changePage(Page value) {
         cancelPendingNote();finishGesture();stopHeldAudition(true);
         if(held[std::size_t(Button::A)])aUsed=true;
-        page = value; mode = Mode::Normal; playback->stopPreview();
+        page = value; mode = Mode::Normal; stopWavePreview();
     }
     void navigatePage(Page value) {
         finishGesture();
@@ -1326,10 +1327,10 @@ struct TrackerApp::Impl {
                 cancelPendingNote();SDL_GameControllerClose(gamepad);gamepad=nullptr;held.fill(false);
                 aPreviewActive=false;aPreviewBlocked=false;selectPending=false;aUsed=bUsed=true;
                 cutChordUsed=false;channelModifier=false;channelChord=0;modalBackHeld=false;
-                finishGesture();playback->stopPreview();notify("CONTROLLER DISCONNECTED");
+                finishGesture();stopWavePreview();notify("CONTROLLER DISCONNECTED");
             }return;
         }
-        if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_LOST){cancelPendingNote();held.fill(false);aPreviewActive=false;aPreviewBlocked=false;selectPending=false;aUsed=bUsed=true;cutChordUsed=false;channelModifier=false;channelChord=0;finishGesture();playback->stopPreview();return;}
+        if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_LOST){cancelPendingNote();held.fill(false);aPreviewActive=false;aPreviewBlocked=false;selectPending=false;aUsed=bUsed=true;cutChordUsed=false;channelModifier=false;channelChord=0;finishGesture();stopWavePreview();return;}
         if(e.type==SDL_CONTROLLERBUTTONDOWN||e.type==SDL_CONTROLLERBUTTONUP){if(auto b=controller(e.cbutton.button)){if(e.type==SDL_CONTROLLERBUTTONDOWN)buttonDown(*b);else buttonUp(*b);}return;}
     }
     int runUiTest() {
@@ -1576,6 +1577,8 @@ struct TrackerApp::Impl {
 #include "../../tests/main_navigation_ui_checks.inc"
 #include "../../tests/brick_feedback_ui_checks.inc"
 #include "../../tests/waveform_view_ui_checks.inc"
+#include "../../tests/wave_preview_ui_checks.inc"
+#include "../../tests/wave_synth_ui_checks.inc"
         changePage(Page::Pattern);draw();
         if(!options.screenshotPath.empty())screenshot(options.screenshotPath);
         std::cout<<"UI TEST PASS: "<<assertions<<" assertions; XM and application screenshots in "<<home.u8string()<<'\n';

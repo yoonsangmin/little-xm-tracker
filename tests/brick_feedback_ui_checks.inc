@@ -144,7 +144,7 @@
             feedbackShot("brick-feedback-confirm.bmp");tap(Button::B);
             openBrowser(FileAction::SaveXm);feedbackShot("brick-feedback-browser.bmp");tap(Button::B);
             changePage(Page::Sample);instrument=1;sample=0;selectionStart=selectionEnd=0;
-            openWaveDraw();openWavePresets();prepareWavePreset(2);createWaveDraft();
+            openWaveDraw();openWavePresets();prepareWavePreset(1);createWaveDraft();
             feedbackShot("brick-feedback-wave.bmp");tap(Button::B);
 #include "dialog_layout_ui_checks.inc"
             changePage(Page::Pattern);row=channel=0;field=3;noticeUntil=0;

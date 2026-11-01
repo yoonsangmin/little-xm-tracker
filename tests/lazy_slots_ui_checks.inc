@@ -58,9 +58,11 @@
                     "PCM paste works directly in an uncreated sample of an uncreated instrument");
             undo();sampleField=11;tap(Button::A);
             require(wavePresetOpen&&!currentSample(),"empty-slot DRAW opens creation settings without materializing a sample");
-            tap(Button::A);tap(Button::Down);tap(Button::A); // BLANK -> FRAMES -> CREATE.
+            for(int step=0;step<12&&waveNewFocus!=7;++step)tap(Button::Down);
+            require(waveNewFocus==7,"empty-slot creation reaches CREATE through the visible synthesis rows");
+            tap(Button::A);
             require(drawingSample&&!currentSample(),"CREATE remains a local draft in an implicit sample slot");
-            tap(Button::Down);tap(Button::Down);tap(Button::Right);tap(Button::A); // DRAW -> APPLY.
+            tap(Button::Down);tap(Button::Down);tap(Button::Right);tap(Button::Right);tap(Button::A); // DRAW -> APPLY.
             require(currentSample()&&currentSample()->pcm.size()==32&&currentSample()->loopLength==32,
                     "Draw Apply creates the selected empty instrument and sample slot");
             playback->stop();page=Page::Pattern;selectedPattern=0;row=channel=field=0;instrument=1;sample=0;

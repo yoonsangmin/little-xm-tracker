@@ -157,11 +157,14 @@ void drawPcmStroke(Sample& sample, std::size_t left, std::size_t frame,
 }
 
 void fillWavePreset(Sample& sample, FrameRange range, WavePreset preset, int amplitude,
-                    std::uint32_t noiseSeed) {
+                    std::uint32_t noiseSeed, int dutyEighths, int levels) {
     require(sample.pcm.size() <= maxFrames && range.first < range.last && range.last <= sample.pcm.size(),
             "Wave preset range is empty or outside PCM data");
     require(amplitude >= 0 && amplitude <= 32767, "Wave amplitude must be 0..32767");
     require(preset >= WavePreset::Sine && preset <= WavePreset::Noise, "Unknown wave preset");
+    require(dutyEighths == 1 || dutyEighths == 2 || dutyEighths == 4 || dutyEighths == 6,
+            "Pulse duty must be 1, 2, 4 or 6 eighths");
+    require(levels == 16 || levels == 256, "Wave levels must be 16 or 256");
     const auto length = range.last - range.first;
     std::uint32_t noise = noiseSeed ? noiseSeed : 0x6d2b79f5u;
     constexpr double tau = 6.283185307179586476925286766559;
@@ -171,14 +174,40 @@ void fillWavePreset(Sample& sample, FrameRange range, WavePreset preset, int amp
         switch (preset) {
         case WavePreset::Sine: value = std::sin(phase * tau); break;
         case WavePreset::Triangle: value = 1.0 - 4.0 * std::abs(phase - 0.5); break;
-        case WavePreset::Square: value = phase < 0.5 ? 1.0 : -1.0; break;
+        case WavePreset::Square: value = phase < double(dutyEighths) / 8.0 ? 1.0 : -1.0; break;
         case WavePreset::Saw: value = phase * 2.0 - 1.0; break;
         case WavePreset::Noise:
             noise ^= noise << 13; noise ^= noise >> 17; noise ^= noise << 5;
             value = (double(noise >> 16) - 32768.0) / 32768.0;
             break;
         }
+        if (levels == 16 && preset != WavePreset::Square && preset != WavePreset::Noise)
+            value = std::round((std::clamp(value, -1.0, 1.0) + 1.0) * 7.5) / 7.5 - 1.0;
         sample.pcm[range.first + n] = quantize(value * amplitude, sample.sixteenBit);
+    }
+}
+
+std::size_t noisePresetFrames(NoisePreset preset) {
+    require(preset == NoisePreset::Short || preset == NoisePreset::Long, "Unknown noise preset");
+    return preset == NoisePreset::Short ? 127u : 32767u;
+}
+
+void fillNoisePreset(Sample& sample, FrameRange range, NoisePreset preset, int amplitude) {
+    const auto length = noisePresetFrames(preset);
+    require(sample.pcm.size() <= maxFrames && range.first < range.last && range.last <= sample.pcm.size(),
+            "Noise preset range is empty or outside PCM data");
+    require(range.last - range.first == length, "Noise preset needs one complete 127 or 32767-frame period");
+    require(amplitude >= 0 && amplitude <= 32767, "Noise amplitude must be 0..32767");
+    const unsigned topBit = preset == NoisePreset::Short ? 6u : 14u;
+    std::uint32_t state = static_cast<std::uint32_t>(length);
+    const auto high = quantize(double(amplitude), sample.sixteenBit);
+    const auto low = quantize(-double(amplitude), sample.sixteenBit);
+    for (std::size_t n = 0; n < length; ++n) {
+        sample.pcm[range.first + n] = (state & 1u) ? low : high;
+        // Adjacent low-bit XOR feedback gives a maximal-length sequence for
+        // both widths. A fixed nonzero seed keeps preview and CREATE identical.
+        const auto feedback = (state ^ (state >> 1u)) & 1u;
+        state = (state >> 1u) | (feedback << topBit);
     }
 }
 
