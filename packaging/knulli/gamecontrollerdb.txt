@@ -1,0 +1,4 @@
+# TrimUI Brick / KNULLI patched SDL2. Face buttons follow Brick's printed labels.
+# Source: knulli-linux 20260511, controllers/es_input.cfg, TRIMUI Brick Controller.
+# KNULLI uses different raw button indices from unpatched upstream SDL2/SDL3.
+030000005e0400008e02000014010000,TRIMUI Brick Controller,a:b5,b:b4,back:b12,start:b13,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,platform:Linux,

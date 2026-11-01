@@ -1,0 +1,14 @@
+* text=auto eol=lf
+licenses/*.txt -whitespace
+*.sh text eol=lf
+*.py text eol=lf
+*.cmake text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.inc text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.png binary
+*.ogg binary
+*.mp3 binary
+*.flac binary

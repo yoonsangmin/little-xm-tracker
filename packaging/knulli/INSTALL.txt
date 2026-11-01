@@ -1,0 +1,111 @@
+Little XM Tracker 0.8.0 - TrimUI Brick / KNULLI
+================================
+
+Installation
+------------
+Extract the archive, then copy these two items from its roms/ports folder
+into roms/ports on KNULLI SHARE:
+
+  SHARE/roms/ports/Little XM Tracker.sh
+  SHARE/roms/ports/xm-tracker/
+    littlexm-tracker
+    gamecontrollerdb.txt
+    assets/fonts/unifont-18.0.01.hex
+    songs/                            (XM songs and rendered song WAVs)
+    instruments/                      (XI instruments)
+    samples/                          (sample audio)
+    themes/                           (.theme files and four bundled presets)
+    userdata/                         (settings and recovery; created on first launch)
+
+On the device, this location is /userdata/roms/ports.
+Refresh the KNULLI game list, then launch Ports > Little XM Tracker.
+PortMaster and separate runtime installation are not required.
+
+This package targets TrimUI Brick, Linux aarch64, with KNULLI's SDL2 runtime.
+Its button mapping is based on the KNULLI Scarab 20260511 sources.
+It is not a Stock or NextUI package. Do not copy a separate SDL2 library:
+the app uses KNULLI's device-specific SDL2.
+
+The manual is at xm-tracker/docs/manual.html. Open it in a browser to read offline.
+
+Files and updates
+-----------------
+Put XM songs in songs, XI instruments in instruments, and sample audio in samples.
+These three folders are beside the executable and are included as empty folders.
+userdata holds two recovery autosaves and application settings.
+themes holds shared .theme files and the Default, Midnight, Amber and Mono presets.
+Preserve your files in songs, instruments, samples, themes and userdata when updating.
+Rename the old XM Tracker.sh to Little XM Tracker.sh, then overwrite it with the new launcher.
+Keep the xm-tracker/ folder name to preserve existing data paths.
+Existing userdata and songs, instruments or samples elsewhere are not moved or deleted automatically.
+
+Song, instrument and sample dialogs start in the default songs / instruments / samples folder.
+They do not remember the last visited folder. Up/Down moves one item; Left/Right moves 15 items.
+A opens a file or folder, B cancels, and Select is unused.
+Open ../ with A to go to the parent folder; the cursor stays on the folder you just left.
+SAVE writes to an existing song's original XM file. SAVE AS starts in songs.
+
+Controls and exit
+-----------------
+A/B refer to the labels printed on Brick. X/Y and L/R are unused.
+D-Pad moves, A+D-Pad edits values, and Start plays or stops.
+Select+Left/Right changes screen. Select alone cancels a selection or opens Actions when nothing is selected.
+UNDO / REDO are at the top of Actions. Notifications include the operation, such as UNDO / CUT.
+Releasing Select after using a combination does not open the menu.
+
+Select+B starts a selection. Extend it with the D-Pad, then press B to copy.
+Repeated Select+B in Pattern: current cell > all rows in the current column > whole pattern > cancel.
+In Song/PCM: range > all > cancel. Canceling a selection does not copy it.
+For selected pattern notes, A+Left/Right transposes by a semitone; A+Up/Down by an octave.
+The sample PROCESS button opens processing options while keeping the selection.
+When a sample range is selected with Select+B, A opens PROCESS directly.
+
+Select+Start in Pattern plays from the cursor row without restoring earlier rows' effect state.
+The top bar shows the current BPM and final L/R output meters.
+A+B cuts; Select+A pastes. B+D-Pad navigates patterns, channel pages, instruments and samples.
+In PATTERN, B+Up/Down moves through 16/32-row pages, then to the previous/next order at the page boundary.
+It keeps the relative row within the page, entering the previous order on its last page and the next on its first.
+In PATTERN or the SONG channel monitor, hold B first, then press Select for Mute or Start for Solo.
+You can keep holding B and repeat Select/Start. Release the second button before pressing it again.
+Empty slots can be browsed. Navigation, playback and canceling dialogs do not modify the song.
+
+On SONG's final '..' order row, A adds the last pattern number +1, stopping at FF. A+B deletes.
+For insertion, use Select > ORDER MANAGEMENT > INSERT ORDER.
+This inserts the same pattern reference before the current position and shifts later orders down.
+In the order grid, Left/Right selects PATTERN/ROWS; A+D-Pad changes the number or length.
+Shortening a pattern asks for confirmation and affects every order using that pattern.
+
+View controls in Actions > CONTROLS. Exit with SONG Actions > EXIT.
+B closes the first Actions menu and returns to the editor.
+Save songs with SONG's SAVE or SAVE AS buttons. Autosave is separate and used for recovery.
+From any tab, use Select > SETTINGS and A+D-Pad to change PATTERN VIEW (4/8 channels),
+PATTERN ROWS (16/32 rows) and ROW NUMBERS (DEC/HEX).
+Display settings do not change the actual pattern length or channel count.
+
+SETTINGS > THEME COLORS edits RGB colors and offers LOAD THEME / SAVE THEME.
+Theme files stay in themes beside the executable; the picker has no parent folder or custom path.
+LOAD THEME previews a draft. APPLY saves active colors across restarts; B cancels.
+SAVE THEME exports the draft without applying it: choose NEW THEME... for a name,
+or an existing file and confirm overwriting. To share, copy its .theme file into themes, then LOAD and APPLY.
+
+In SAMPLE's DRAW dialog, Left/Right moves between points from VALUE or EDIT POINTS.
+Use A+D-Pad on VALUE to change amplitude. In NEW WAVE, choose a waveform and FRAMES, then CREATE a draft.
+APPLY in DRAW commits it to the sample; B cancels.
+
+There is no in-app controller mapping. When porting to another device, edit gamecontrollerdb.txt
+using SDL2's mapping format. SDL calls the Select button back.
+
+Troubleshooting
+---------------
+  xm-tracker/userdata/launcher.log           Latest launch log
+  xm-tracker/userdata/launcher.previous.log  Previous launch log
+
+If the app is missing from Ports, check the file location and .sh extension, then refresh the list.
+For executable permission problems, run these commands once in the device terminal or over SSH:
+
+  chmod +x '/userdata/roms/ports/Little XM Tracker.sh'
+  chmod +x /userdata/roms/ports/xm-tracker/littlexm-tracker
+
+Include your KNULLI version, steps to reproduce and launcher.log with bug reports.
+If there is no sound, also check KNULLI's output device and volume.
+The app does not change the firmware's global audio or controller settings.

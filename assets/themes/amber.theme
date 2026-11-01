@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Amber
+background #171107
+panel #22190B
+highlight #332711
+text #FFE3A3
+secondary_text #C3A065
+dim_text #7F663D
+accent #FFBB55
+cursor #FFE0A0
+volume #E8C16A
+warning #FFD181
+selection #4A3515
+sample_selection #3A2B14
+overlay #0C0802

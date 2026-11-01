@@ -1,0 +1,7 @@
+# Optional SDL2 controller mappings. Installed beside the executable.
+# SDL-supported controllers work without any entries here.
+# For another device, add its SDL GUID/name and hardware bindings:
+# GUID,Device Name,a:b0,b:b1,back:b2,start:b3,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,platform:Linux,
+# Replace GUID, button indices, hat values and platform for the actual device.
+# The editor uses only D-pad, A, B, Start and Select (SDL name: back).
+# Mapping format: https://wiki.libsdl.org/SDL2/SDL_GameControllerAddMapping

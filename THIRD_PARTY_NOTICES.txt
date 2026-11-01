@@ -1,0 +1,52 @@
+Little XM Tracker 0.8.0
+
+Application code, original ASCII bitmap font, and demo PCM data are original to this project
+and distributed under the BSD 3-Clause license in LICENSE.
+
+MilkyPlay
+  Project: https://github.com/milkytracker/MilkyTracker
+  Revision: e3ceb05105e8c5bdc907d6451245bf5a1926b1f9
+  Source archive SHA256:
+    e25a72c6b0a4f656f71ca70c667e03ccb7097ff121889d1df360f51e57245325
+  License: BSD 3-Clause; see licenses/MilkyPlay.txt and original file headers.
+  The selected src/milkyplay implementation files are compiled unchanged.
+  No MilkyTracker GUI/editor, MIDI, compression, or GPL build files are linked
+  or copied into the application. The complete source archive is a build cache.
+  Our CMake integration and Playback adapter are separate, app-owned files.
+
+  Additional origin notice from upstream src/milkyplay/computed-blep.h:
+  the included Amiga resampling table was taken from UADE 2.09 and generated
+  by contrib/sinc-integral.py. Upstream source notices are preserved.
+  UADE source: https://gitlab.com/uade-music-player/uade/-/tree/uade-2.09
+
+SDL2
+  Project: https://github.com/libsdl-org/SDL
+  License: zlib; see licenses/SDL2.txt.
+  Uses the target Linux system or SDK's SDL2 package; no SDL2 library is bundled.
+
+miniaudio (sample import only)
+  Project: https://github.com/mackron/miniaudio
+  Version: 0.11.23; commit f40cf03f80cdb7e741d43e53b7e706e8c1394bcf
+  Source archive SHA256:
+    96d032b8e77061c9e2c07fd524141b67f20fe99f86ec63243a3fd06ea7f93793
+  License selected: MIT No Attribution; see licenses/miniaudio.txt.
+  Unmodified miniaudio.h supplies WAV, FLAC and MP3 decoding. Device IO,
+  threading, engine, synthesis and encoding are disabled. SDL2 and MilkyPlay
+  continue to own playback and capture. No upstream source modifications.
+
+stb_vorbis (sample import only)
+  Author: Sean Barrett and contributors.
+  Version: 1.22, extras/stb_vorbis.c from the miniaudio snapshot above.
+  License selected: MIT; see licenses/stb_vorbis.txt.
+  Compiled unchanged for Ogg Vorbis decoding. Ogg Opus is not supported.
+
+LSDj, M8, and ChooChooTracker are interaction references. Their code,
+graphics, fonts, samples, product names, and logos are not included.
+
+GNU Unifont
+  Project: https://unifoundry.com/unifont/index.html
+  Version: 18.0.01, unmodified Plane 0 .hex bitmap font data
+  License selected for redistribution: SIL Open Font License 1.1.
+  See licenses/Unifont-OFL-1.1.txt and assets/fonts/README.txt for copyright,
+  source URL, hashes and coverage limitations.
+  The font stays a separate data asset; no Unifont GPL utility code is included.

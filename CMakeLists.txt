@@ -1,0 +1,170 @@
+cmake_minimum_required(VERSION 3.24)
+project(little_xm_tracker VERSION 0.8.0 LANGUAGES CXX)
+
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "Little XM Tracker targets Linux / TrimUI Brick.")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+option(TRACKER_BUILD_APP "Build the SDL2 handheld application" ON)
+option(TRACKER_BUILD_TESTS "Build codec and audio regression tests" ON)
+
+include(cmake/Dependencies.cmake)
+find_package(Threads REQUIRED)
+
+# GCC 8's C++17 filesystem implementation is a separate runtime archive.
+# The existing Brick/A133 SDK uses GCC 8; newer compilers need no extra link.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+    link_libraries(stdc++fs)
+endif()
+
+# Build an unchanged subset of upstream. All platform integration belongs here,
+# not in a patch to the MilkyPlay implementation.
+set(MILKY_DIR "${MILKYTRACKER_SOURCE_DIR}/src/milkyplay")
+add_library(milkyplay_core STATIC
+    ${MILKY_DIR}/XModule.cpp
+    ${MILKY_DIR}/LoaderXM.cpp
+    ${MILKY_DIR}/XMFile.cpp
+    ${MILKY_DIR}/LittleEndian.cpp
+    ${MILKY_DIR}/PlayerSTD.cpp
+    ${MILKY_DIR}/PlayerBase.cpp
+    ${MILKY_DIR}/ChannelMixer.cpp
+    ${MILKY_DIR}/ResamplerFactory.cpp)
+target_include_directories(milkyplay_core SYSTEM PUBLIC "${MILKY_DIR}")
+target_compile_definitions(milkyplay_core PUBLIC MP_XMONLY MILKYTRACKER __MPTIMETRACKING__)
+target_compile_options(milkyplay_core PRIVATE -fno-strict-aliasing)
+
+add_library(tracker_document STATIC src/model/Document.cpp src/model/EditOperations.cpp src/model/TrackerExtras.cpp src/model/SampleTools.cpp src/model/SampleAnalysis.cpp src/model/SampleChop.cpp src/model/EnvelopePresets.cpp src/model/Minimise.cpp src/model/Arrangement.cpp src/model/Cleanup.cpp src/io/Codec.cpp src/io/Recovery.cpp src/io/Theme.cpp)
+target_include_directories(tracker_document PUBLIC src)
+add_library(tracker_decoders STATIC src/io/AudioDecoder.cpp)
+target_include_directories(tracker_decoders PRIVATE src)
+target_include_directories(tracker_decoders SYSTEM PRIVATE "${MINIAUDIO_SOURCE_DIR}")
+add_library(tracker_import STATIC src/io/AudioImport.cpp)
+target_include_directories(tracker_import PUBLIC src)
+target_include_directories(tracker_import SYSTEM PRIVATE "${MINIAUDIO_SOURCE_DIR}")
+target_link_libraries(tracker_import PUBLIC tracker_document PRIVATE tracker_decoders)
+target_compile_options(tracker_decoders PRIVATE -w)
+add_library(tracker_text STATIC src/text/Utf8.cpp)
+target_include_directories(tracker_text PUBLIC src)
+target_link_libraries(tracker_document PRIVATE tracker_text)
+add_library(tracker_audio STATIC src/audio/Playback.cpp src/audio/Capture.cpp)
+target_include_directories(tracker_audio PUBLIC src)
+target_link_libraries(tracker_audio PUBLIC tracker_document SDL2::SDL2 Threads::Threads PRIVATE milkyplay_core)
+target_compile_definitions(tracker_audio PUBLIC SDL_MAIN_HANDLED)
+
+function(tracker_warnings target)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+endfunction()
+tracker_warnings(tracker_document)
+tracker_warnings(tracker_import)
+tracker_warnings(tracker_text)
+tracker_warnings(tracker_audio)
+
+if(TRACKER_BUILD_APP)
+    add_executable(littlexm-tracker
+        src/app/main.cpp
+        src/ui/TrackerApp.cpp
+        src/ui/BitmapFont.cpp)
+    target_link_libraries(littlexm-tracker PRIVATE tracker_audio tracker_text tracker_import)
+    tracker_warnings(littlexm-tracker)
+    add_custom_command(TARGET littlexm-tracker POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:littlexm-tracker>/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/assets/gamecontrollerdb.txt" "$<TARGET_FILE_DIR:littlexm-tracker>/gamecontrollerdb.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/themes" "$<TARGET_FILE_DIR:littlexm-tracker>/themes"
+        VERBATIM)
+    install(TARGETS littlexm-tracker RUNTIME DESTINATION .)
+    install(FILES README.md LICENSE THIRD_PARTY_NOTICES.txt DESTINATION .)
+    install(FILES docs/manual.html docs/index.html DESTINATION docs)
+    install(DIRECTORY docs/images/ DESTINATION docs/images)
+    install(FILES assets/gamecontrollerdb.txt DESTINATION .)
+    install(DIRECTORY licenses/ DESTINATION licenses)
+    install(DIRECTORY assets/ DESTINATION assets PATTERN "themes" EXCLUDE)
+    install(DIRECTORY assets/themes/ DESTINATION themes)
+endif()
+
+if(TRACKER_BUILD_TESTS)
+    enable_testing()
+    add_executable(theme_file_tests tests/theme_file_tests.cpp)
+    target_link_libraries(theme_file_tests PRIVATE tracker_document)
+    tracker_warnings(theme_file_tests)
+    add_test(NAME theme_files COMMAND theme_file_tests "${CMAKE_SOURCE_DIR}/assets/themes")
+    add_executable(codec_tests tests/codec_tests.cpp)
+    target_link_libraries(codec_tests PRIVATE tracker_document)
+    tracker_warnings(codec_tests)
+    add_test(NAME xm_xi_wav_roundtrip COMMAND codec_tests)
+    add_executable(recovery_tests tests/recovery_tests.cpp)
+    target_link_libraries(recovery_tests PRIVATE tracker_document)
+    tracker_warnings(recovery_tests)
+    add_test(NAME two_slot_recovery COMMAND recovery_tests)
+    add_executable(arrangement_tests tests/arrangement_tests.cpp)
+    target_link_libraries(arrangement_tests PRIVATE tracker_document)
+    tracker_warnings(arrangement_tests)
+    add_test(NAME pattern_arrangement COMMAND arrangement_tests)
+    add_executable(cleanup_tests tests/cleanup_tests.cpp)
+    target_link_libraries(cleanup_tests PRIVATE tracker_document)
+    tracker_warnings(cleanup_tests)
+    add_test(NAME cleanup_unused COMMAND cleanup_tests)
+    add_executable(tracker_extras_tests tests/tracker_extras_tests.cpp)
+    target_link_libraries(tracker_extras_tests PRIVATE tracker_document)
+    tracker_warnings(tracker_extras_tests)
+    add_test(NAME ft2_edit_tools COMMAND tracker_extras_tests)
+    add_executable(sample_tools_tests tests/sample_tools_tests.cpp)
+    target_link_libraries(sample_tools_tests PRIVATE tracker_document)
+    tracker_warnings(sample_tools_tests)
+    add_test(NAME ft2_sample_tools COMMAND sample_tools_tests)
+    add_executable(sample_analysis_tests tests/sample_analysis_tests.cpp)
+    target_link_libraries(sample_analysis_tests PRIVATE tracker_document)
+    tracker_warnings(sample_analysis_tests)
+    add_test(NAME sample_pitch_detection COMMAND sample_analysis_tests)
+    add_executable(sample_chop_tests tests/sample_chop_tests.cpp)
+    target_link_libraries(sample_chop_tests PRIVATE tracker_document)
+    tracker_warnings(sample_chop_tests)
+    add_test(NAME sample_chop COMMAND sample_chop_tests)
+    add_executable(envelope_presets_tests tests/envelope_presets_tests.cpp)
+    target_link_libraries(envelope_presets_tests PRIVATE tracker_document)
+    tracker_warnings(envelope_presets_tests)
+    add_test(NAME envelope_presets COMMAND envelope_presets_tests)
+    add_executable(minimise_tests tests/minimise_tests.cpp)
+    target_link_libraries(minimise_tests PRIVATE tracker_document)
+    tracker_warnings(minimise_tests)
+    add_test(NAME minimise_samples COMMAND minimise_tests)
+    add_executable(audio_import_tests tests/audio_import_tests.cpp)
+    target_link_libraries(audio_import_tests PRIVATE tracker_import)
+    tracker_warnings(audio_import_tests)
+    add_test(NAME audio_import COMMAND audio_import_tests "${CMAKE_SOURCE_DIR}/tests/fixtures/audio")
+    add_executable(audio_tests tests/audio_tests.cpp)
+    target_link_libraries(audio_tests PRIVATE tracker_audio)
+    tracker_warnings(audio_tests)
+    add_test(NAME milkyplay_audio COMMAND audio_tests)
+    set_tests_properties(milkyplay_audio PROPERTIES ENVIRONMENT "SDL_AUDIODRIVER=dummy" TIMEOUT 90)
+    add_executable(capture_tests tests/capture_tests.cpp)
+    target_link_libraries(capture_tests PRIVATE tracker_audio)
+    tracker_warnings(capture_tests)
+    add_test(NAME bounded_microphone_capture COMMAND capture_tests)
+    set_tests_properties(bounded_microphone_capture PROPERTIES ENVIRONMENT "SDL_AUDIODRIVER=dummy" TIMEOUT 15)
+    add_executable(text_tests tests/text_tests.cpp)
+    target_link_libraries(text_tests PRIVATE tracker_text tracker_document)
+    tracker_warnings(text_tests)
+    add_test(NAME unicode_names COMMAND text_tests)
+    add_executable(font_tests tests/font_tests.cpp src/ui/BitmapFont.cpp)
+    target_link_libraries(font_tests PRIVATE tracker_text SDL2::SDL2 Threads::Threads)
+    target_compile_definitions(font_tests PRIVATE SDL_MAIN_HANDLED)
+    tracker_warnings(font_tests)
+    add_test(NAME unicode_font_layout COMMAND font_tests "${CMAKE_SOURCE_DIR}/assets/fonts/unifont-18.0.01.hex")
+    set_tests_properties(unicode_font_layout PROPERTIES TIMEOUT 30)
+    if(TRACKER_BUILD_APP)
+        add_test(NAME sdl_app_smoke COMMAND littlexm-tracker --demo --no-audio --smoke
+            --data-dir "${CMAKE_BINARY_DIR}/test-output/smoke")
+        set_tests_properties(sdl_app_smoke PROPERTIES
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+        add_test(NAME gamepad_editor_flow COMMAND littlexm-tracker --ui-test
+            --data-dir "${CMAKE_BINARY_DIR}/test-output/ui")
+        set_tests_properties(gamepad_editor_flow PROPERTIES
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+    endif()
+endif()

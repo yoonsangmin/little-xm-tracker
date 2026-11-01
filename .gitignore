@@ -1,0 +1,11 @@
+/.deps/
+/build*/
+/dist/
+/userdata/
+/test-output/
+/design/
+/tools/build-philosophy-preview.py
+/tools/render-philosophy-preview.cjs
+/tools/render-design-preview.py
+/tools/render-instrument-structure.py
+__pycache__/

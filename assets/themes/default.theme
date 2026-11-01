@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Default
+background #0D131D
+panel #151F2C
+highlight #1A2736
+text #DEE8F2
+secondary_text #7A93A6
+dim_text #405465
+accent #56DEDA
+cursor #FFC768
+volume #82DD8F
+warning #F68080
+selection #22414C
+sample_selection #273640
+overlay #04080F

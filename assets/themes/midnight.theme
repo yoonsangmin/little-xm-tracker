@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Midnight
+background #11101B
+panel #1D192C
+highlight #29213D
+text #EEE7FF
+secondary_text #AFA0C7
+dim_text #66597C
+accent #B49AFF
+cursor #E2B5FF
+volume #A6DDB3
+warning #FF99B7
+selection #3D2D58
+sample_selection #332941
+overlay #08050F

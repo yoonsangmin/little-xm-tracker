@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Mono
+background #141414
+panel #202020
+highlight #303030
+text #EEEEEE
+secondary_text #B0B0B0
+dim_text #676767
+accent #D0D0D0
+cursor #F4F4F4
+volume #BCBCBC
+warning #EEEEEE
+selection #3B3B3B
+sample_selection #363636
+overlay #060606
