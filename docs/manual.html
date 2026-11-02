@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Little XM Tracker Manual · 0.9.0</title>
+<title>Little XM Tracker Manual · 0.9.1</title>
 <style>
 :root{--nav:#15202e;--paper:#f7f8f6;--ink:#223041;--muted:#586a76;--line:#d9e2df;--accent:#087b77;--soft:#e6f2ef;--amber:#82520c}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.8 "Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}button,input,summary{font:inherit}a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #d18c25;outline-offset:3px}.skip{position:fixed;top:-80px;left:12px;background:white;padding:12px;z-index:10}.skip:focus{top:12px}
@@ -15,7 +15,7 @@ main{margin-left:272px;max-width:1320px;padding:58px 66px 90px}.eyebrow{color:va
 </head>
 <body>
 <a href="#start" class="skip">Skip to content</a>
-<aside aria-label="Manual navigation"><div class="brand">Little XM Tracker</div><div class="edition">Controls guide · 0.9.0</div>
+<aside aria-label="Manual navigation"><div class="brand">Little XM Tracker</div><div class="edition">Controls guide · 0.9.1</div>
 <label for="search">Search the manual</label><input id="search" type="search" placeholder="e.g. copy, save, draw" autocomplete="off" aria-controls="results"><div id="status" aria-live="polite"></div><ul id="results"></ul>
 <details id="toc" open><summary>Contents</summary><nav aria-label="Table of contents"><a href="#start">Controls &amp; navigation</a><a href="#first-song">Quick start</a><a href="#screens">Screen controls</a><a href="#playback">Playback &amp; audition</a><a href="#tools">Actions &amp; editing tools</a><a href="#files">Files, saving &amp; recovery</a><a href="#settings">Settings &amp; mapping</a><a href="#install">Brick installation</a><a href="#references">Effect references</a></nav></details></aside>
 <main>
@@ -174,7 +174,7 @@ main{margin-left:272px;max-width:1320px;padding:58px 66px 90px}.eyebrow{color:va
 <section id="install"><h2>Brick installation</h2><ol><li>Extract the Brick/KNULLI ARM64 ZIP.</li><li>Copy <code>roms/ports/Little XM Tracker.sh</code> and <code>roms/ports/xm-tracker/</code> into KNULLI SHARE's <code>roms/ports</code>.</li><li>Refresh the game list, then launch <code>Ports → Little XM Tracker</code>.</li></ol><p>The ZIP includes empty <code>songs/</code>, <code>instruments/</code>, <code>samples/</code>, <code>themes/</code> and <code>userdata/</code> folders. On launch, the app creates <code>userdata/</code> and <code>themes/</code> if needed and copies missing theme presets and the editable <code>gamecontrollerdb.txt</code> from <code>assets/</code>; existing files are kept. Removed song, instrument and sample folders are not recreated.</p><p><strong>Updating:</strong> copy the whole new distribution over the existing installation, merging folders and overwriting matching application files. Do not delete or replace the existing <code>xm-tracker/</code> folder first. The ZIP contains no files in the five user folders and no root mapping file, so your content and settings stay in place. For launch issues, include your KNULLI version and <code>userdata/launcher.log</code>.</p><p>When updating an older version, rename <code>XM Tracker.sh</code> to <code>Little XM Tracker.sh</code>.</p></section>
 
 <section id="references"><h2>Effect references</h2><ul><li><a href="https://milkytracker.org/docs/manual/MilkyTracker.html">MilkyTracker manual</a> — effect command reference.</li><li><a href="https://milkytracker.org/docs/FT2.pdf">Original FastTracker II manual (PDF)</a> — effects, instruments and sample editing.</li><li><a href="https://wiki.openmpt.org/Manual:_Effect_Reference">OpenMPT effect reference</a> — use the XM entries.</li></ul><p class="small">Controls and extra features in external manuals differ from this app.</p></section>
-<footer>Little XM Tracker · Controls guide 0.9.0 · 2026-11-02</footer></main>
+<footer>Little XM Tracker · Controls guide 0.9.1 · 2026-11-02</footer></main>
 <script>
 (() => {
   const input=document.getElementById('search'),results=document.getElementById('results'),status=document.getElementById('status');
