@@ -20,8 +20,20 @@
                 require(!worker.valid(),"sample analysis completes within its bounded worker budget");
             };
             auto focusChop=[&](int target){
-                while(chopField<target)tap(Button::Down);
-                while(chopField>target)tap(Button::Up);
+                // Navigate the visible rows through real button events. Field
+                // IDs are deliberately not ordered by their screen positions.
+                const std::array<int,10> rows{{0,0,1,2,3,-1,5,3,4,4}};
+                const std::array<int,10> columns{{0,1,0,0,0,-1,0,1,0,1}};
+                require(mode==Mode::ChopSettings&&target>=0&&target<10&&target!=5,"Chop focus target exists");
+                for(int step=0;step<6;++step) {
+                    require(chopField>=0&&chopField<10&&chopField!=5,"Chop navigation remains on a visible field");
+                    const int current=rows[std::size_t(chopField)],desired=rows[std::size_t(target)];
+                    if(current==desired)break;
+                    tap(current<desired?Button::Down:Button::Up);
+                }
+                require(rows[std::size_t(chopField)]==rows[std::size_t(target)],"Chop up/down reaches the requested row");
+                if(chopField!=target)tap(columns[std::size_t(target)]?Button::Right:Button::Left);
+                require(chopField==target,"Chop left/right reaches the requested field within its row");
             };
             auto previewChop=[&]{focusChop(3);tap(Button::A);require(mode==Mode::Busy,"Chop builds preview off the UI thread");finishAnalysisWorker();
                 require(mode==Mode::ChopSettings&&chopDraft.has_value(),"Chop worker returns a reviewable draft");};
@@ -63,16 +75,35 @@
             menu("CHOP SAMPLE");
             require(mode==Mode::ChopSettings&&!chopSnap&&!chopCurrent&&chopNewInstrument==4,
                     "New Chop starts exact and skips authored or referenced empty instruments");
-            tap(Button::Left);tap(Button::Right);tap(Button::Up);
-            require(chopField==0,"vertical Chop fields ignore Left/Right and clamp at the top");
+            tap(Button::Left);tap(Button::Up);require(chopField==0,"Chop top-left field clamps without wrapping");
+            tap(Button::Right);tap(Button::Right);tap(Button::Up);
+            require(chopField==1,"Chop right selects the other field on the same row and clamps at the edge");
+            tap(Button::Down);tap(Button::Left);tap(Button::Right);
+            require(chopField==2,"Chop single-field row ignores horizontal navigation");
+            tap(Button::Up);require(chopField==1,"Returning to the Chop top row remembers its last column");
             previewChop();
-            require(chopDraft->boundaries.front()==128&&chopDraft->boundaries.back()==8064&&chopDraft->slices.size()==8&&
+            require(chopDraft->boundaries.front()==128&&chopDraft->boundaries.back()==8064&&chopSliceCount()==8&&
                     io::encodeXm(doc)==chopBefore&&undoStack.empty(),"Preview honors selection without changing the song");
             noticeUntil=0;draw();screenshot(home/"sample-chop-preview.bmp");SDL_RenderPresent(renderer);
-            focusChop(6);tap(Button::Right);tap(Button::Left);tap(Button::Down);
-            require(chopField==6,"Chop Apply ignores Left/Right and clamps at the bottom");
-            focusChop(5);tap(Button::A);std::fill(listenPcm.begin(),listenPcm.end(),0);playback->readFrames(listenPcm.data(),2048);
-            require(std::any_of(listenPcm.begin(),listenPcm.end(),[](std::int16_t n){return n!=0;}),"Chop preview auditions the selected slice");
+            focusChop(6);tap(Button::Right);tap(Button::Down);
+            require(chopField==6,"Chop Apply clamps at the right and bottom edges");
+            tap(Button::Left);tap(Button::Left);tap(Button::Down);
+            require(chopField==6,"Chop single Apply button ignores horizontal navigation and never reaches the removed Listen button");
+            tap(Button::Up);require(chopField==8,"Chop up enters the preceding button row");
+            tap(Button::Right);tap(Button::Down);require(chopField==6,"Chop down enters the single Apply button");
+            tap(Button::Right);tap(Button::Up);require(chopField==9,"Chop add/remove row restores its last selected column");
+            focusChop(4);tap(Button::Start);std::fill(listenPcm.begin(),listenPcm.end(),0);playback->readFrames(listenPcm.data(),2048);
+            require(std::any_of(listenPcm.begin(),listenPcm.end(),[](std::int16_t n){return n!=0;})&&!playback->status().playing,
+                    "Start in Chop auditions the selected slice independently of song transport");
+            tap(Button::A);require(playback->samplePreviewStatus().active,"Releasing A does not stop a Start-triggered slice preview");
+            tap(Button::Start);require(!playback->samplePreviewStatus().active,"A second Start stops the selected slice preview");
+            tap(Button::Start);for(int n=0;n<6;++n)playback->readFrames(listenPcm.data(),2048);
+            require(!playback->samplePreviewStatus().active,"A Chop slice ends naturally without looping");
+            tap(Button::Start);playback->readFrames(listenPcm.data(),128);
+            require(playback->samplePreviewStatus().active,"One Start retriggers a naturally finished Chop slice");
+            playback->playSong(0,0);tap(Button::Start);
+            require(!playback->status().playing&&!playback->samplePreviewStatus().active,
+                    "Start in Chop stops active song transport before starting a new audition");
             focusChop(6);tap(Button::A);
             require(mode==Mode::Normal&&instrument==4&&sample==0&&doc.instruments.size()==4&&undoStack.size()==1,
                     "New Chop creates its chosen empty instrument with one undo step");
@@ -120,7 +151,94 @@
                     "Current destination still works when all instrument positions are occupied");
             resetAnalysisFixture();menu("CHOP SAMPLE");previewChop();focusChop(1);chord({Button::Right});
             require(chopSnap&&!chopDraft,"Changing boundary mode invalidates old preview");previewChop();
-            require(chopDraft->slices.size()==8,"Optional attack snap keeps requested slice count");tap(Button::B);
+            require(chopSliceCount()==8,"Optional attack snap keeps requested slice count");tap(Button::B);
             require(!analysisSource&&!chopDraft&&undoStack.empty(),"Leaving Chop discards preview without an edit");
+
+            resetAnalysisFixture();selectionStart=256;selectionEnd=7936;
+            const auto manualBefore=io::encodeXm(doc),manualSource=io::encodeXi(doc.instruments[0]);
+            const auto manualPcm=currentSample()->pcm;
+            const auto manualSerial=recoverySerial,manualRevision=documentRevision;
+            menu("CHOP SAMPLE");
+            focusChop(7);chord({Button::Right});focusChop(8);tap(Button::A);focusChop(9);tap(Button::A);
+            require(!chopDraft&&io::encodeXm(doc)==manualBefore&&undoStack.empty(),
+                    "Manual controls require a built preview without editing the source");
+            focusChop(0);chord({Button::Left,Button::Left,Button::Left,Button::Left});previewChop();
+            require(chopDraft->boundaries==std::vector<std::size_t>({256,2176,4096,6016,7936}),
+                    "Four-slice draft covers the full selected source range");
+            focusChop(7);chord({Button::Right});
+            require(chopDraft->boundaries[1]==2177,"A+Right moves the selected slice's right cut by one frame");
+            chord({Button::Up});require(chopDraft->boundaries[1]==2253,"A+Up moves a cut by one percent of the selected range");
+            chord({Button::Down});require(chopDraft->boundaries[1]==2177,"A+Down reverses the coarse cut move");
+            focusChop(8);tap(Button::A);
+            require(chopSliceCount()==5&&chopCount==5&&chopDraft->boundaries[1]==1216&&chopDraft->boundaries[2]==2177,
+                    "Add Cut splits the selected slice at its midpoint without shifting existing cuts");
+            focusChop(9);tap(Button::A);
+            require(chopSliceCount()==4&&chopDraft->boundaries[1]==2177,"Remove Cut merges with the next slice without deleting PCM");
+            focusChop(8);tap(Button::A);focusChop(4);chord({Button::Right});
+            require(chopSlice==1,"Slice control selects the second manual slice");
+            tap(Button::Start);playback->readFrames(listenPcm.data(),128);
+            const auto firstManualCursor=playback->samplePreviewStatus();
+            require(firstManualCursor.active&&firstManualCursor.instrument==1&&firstManualCursor.sample==0&&
+                    firstManualCursor.frame>=1216&&firstManualCursor.frame<2177&&!playback->status().playing,
+                    "Manual slice audition reports its source identity and cursor within the selected cuts");
+            playback->readFrames(listenPcm.data(),512);
+            const auto nextManualCursor=playback->samplePreviewStatus();
+            require(nextManualCursor.active&&nextManualCursor.frame>firstManualCursor.frame&&nextManualCursor.frame<2177,
+                    "Manual slice playback cursor advances within the audition range");
+            noticeUntil=0;draw();screenshot(home/"sample-chop-manual.bmp");SDL_RenderPresent(renderer);
+            focusChop(7);chord({Button::Left});
+            require(!playback->samplePreviewStatus().active,"Moving a cut stops the old slice preview");
+            require(chopDraft->manual&&chopDraft->snappedBoundaries==0&&io::encodeXm(doc)==manualBefore&&
+                    undoStack.empty()&&redoStack.empty()&&!dirty&&recoverySerial==manualSerial&&documentRevision==manualRevision,
+                    "Manual cuts only change the draft, never the document, history or recovery revision");
+            const auto manualCuts=chopDraft->boundaries;
+            focusChop(6);tap(Button::A);
+            require(mode==Mode::Normal&&instrument==2&&sample==0&&undoStack.size()==1&&
+                    currentInstrument()->samples.size()==manualCuts.size()-1&&io::encodeXi(doc.instruments[0])==manualSource,
+                    "Apply builds the manually planned slices in one edit while preserving the source instrument");
+            std::vector<std::int16_t> joinedManualPcm;
+            for(std::size_t n=0;n+1<manualCuts.size();++n) {
+                const auto& piece=currentInstrument()->samples[n].pcm;
+                require(piece==std::vector<std::int16_t>(manualPcm.begin()+std::ptrdiff_t(manualCuts[n]),
+                                                       manualPcm.begin()+std::ptrdiff_t(manualCuts[n+1])),
+                        "Each applied manual slice contains its exact contiguous source frames");
+                joinedManualPcm.insert(joinedManualPcm.end(),piece.begin(),piece.end());
+            }
+            require(joinedManualPcm==std::vector<std::int16_t>(manualPcm.begin()+256,manualPcm.begin()+7936),
+                    "Joining manual slices reproduces the selection without gaps, overlaps or reprocessing");
+            undo();require(io::encodeXm(doc)==manualBefore&&instrument==1&&sample==0&&selectionStart==256&&selectionEnd==7936,
+                    "One Undo restores the entire pre-manual-Chop song and source selection");
+
+            resetAnalysisFixture();selectionStart=100;selectionEnd=300;
+            const auto boundedBefore=io::encodeXm(doc);
+            menu("CHOP SAMPLE");focusChop(0);
+            chord({Button::Left,Button::Left,Button::Left,Button::Left,Button::Left,Button::Left});previewChop();
+            focusChop(7);chord({Button::Up});
+            require(chopDraft->boundaries[1]==202,"Coarse movement scales to the selected range rather than full sample length");
+            for(int n=0;n<128;++n)chord({Button::Down});
+            require(chopDraft->boundaries==std::vector<std::size_t>({100,101,300}),
+                    "Moving a cut left stops one frame after its previous neighbor");
+            focusChop(8);tap(Button::A);
+            require(chopSliceCount()==2&&chopDraft->boundaries[1]==101,"A one-frame slice cannot be split into empty slices");
+            focusChop(7);for(int n=0;n<128;++n)chord({Button::Up});
+            require(chopDraft->boundaries==std::vector<std::size_t>({100,299,300}),
+                    "Moving a cut right stops one frame before its next neighbor");
+            focusChop(4);chord({Button::Right});focusChop(7);chord({Button::Left,Button::Up});
+            focusChop(9);tap(Button::A);
+            require(chopDraft->boundaries==std::vector<std::size_t>({100,299,300}),
+                    "The final endpoint cannot move or be removed");
+            focusChop(4);chord({Button::Left});focusChop(9);tap(Button::A);tap(Button::A);
+            require(chopSliceCount()==1&&chopCount==1&&chopSlice==0&&chopDraft->boundaries==std::vector<std::size_t>({100,300}),
+                    "Removing the last interior cut leaves one complete slice and preserves both endpoints");
+            focusChop(0);chord({Button::Left});
+            require(chopCount==1&&chopDraft,"Automatic slice count clamps at one without discarding an unchanged manual draft");
+            for(int n=0;n<20;++n)chord({Button::Right});
+            require(chopCount==16&&!chopDraft,"Automatic slice count clamps at sixteen and invalidates changed cut plans");
+            previewChop();const auto maximumCuts=chopDraft->boundaries;
+            focusChop(8);tap(Button::A);
+            require(chopSliceCount()==16&&chopDraft->boundaries==maximumCuts,"Add Cut refuses a seventeenth slice without changing the draft");
+            focusChop(7);chord({Button::Right});tap(Button::B);
+            require(mode==Mode::Normal&&!analysisSource&&!chopDraft&&io::encodeXm(doc)==boundedBefore&&undoStack.empty()&&!dirty,
+                    "Cancel discards all manual changes without modifying or creating any instrument");
             resetAnalysisFixture();noticeUntil=0;
         }

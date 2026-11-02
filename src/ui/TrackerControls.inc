@@ -5,6 +5,7 @@
     int channelChord=0; // 1: mute, 2: solo; consume until both secondary keys are up.
     int songMonitorReturnField=7;
     int blockSelectStage=0, orderBlockStart=0, orderSelectStage=0, pcmSelectStage=0;
+    // pcmSelecting remembers the Select+B cycle only; it never captures D-pad navigation.
     bool orderBlockSelected=false, pcmSelecting=false;
     std::vector<std::uint8_t> orderBlockClipboard;
 
@@ -120,7 +121,7 @@
                 pcmSelecting=true;pcmSelectStage=1;
             }else if(pcmSelectStage<2){selectionStart=0;selectionEnd=int(s->pcm.size());pcmSelectStage=2;}
             else {cancelSelection();return;}
-            sampleField=8;notify("PCM SELECTED / DPAD END / B COPY / A+B CUT");
+            sampleField=8;rememberSampleFocus();notify("PCM SELECTED / A+DPAD RANGE / B COPY / A+B CUT");
         }
     }
     void pasteCurrent() {
@@ -220,18 +221,10 @@
         else if(instrumentField==8)rename(NameTarget::Instrument);
         else if(instrumentField==9)openBrowser(FileAction::ImportXi);
         else if(instrumentField==10||instrumentField==11)openEnvelope(instrumentField==11);
-        else auditionNote();
     }
     void activateSampleField() {
-        if(pcmSelecting||sampleField==14)openSampleProcessing();
+        if(sampleField==14)openSampleProcessing();
         else if(sampleField==9)rename(NameTarget::Sample);
         else if(sampleField==10)openBrowser(FileAction::ImportAudio);
         else if(sampleField==11)openWaveDraw();
-        else if(sampleField==13) {
-            if(selectionEnd<=selectionStart)throw std::runtime_error("SELECT A PCM RANGE FIRST");
-            mutate([&]{auto& s=*currentSampleChecked();s.loopStart=selectionStart;s.loopLength=selectionEnd-selectionStart;s.loopType=1;});
-        } else if(currentSample()) {
-            const bool range=sampleField==12&&selectionEnd>selectionStart;
-            playback->previewSample(instrument,sample,keymapNote,range?selectionStart:0,range?selectionEnd:-1);
-        }
     }

@@ -67,6 +67,193 @@ bool emptyMeter(const brick::OutputMeter& meter) {
     return meter.peak == std::array<float, 2>{} && meter.clipped == std::array<bool, 2>{};
 }
 
+void previewActivity() {
+    using namespace brick;
+    auto document = fixture();
+    document.patterns[0].at(0, 1, document.channels) = {49, 1, 0x50, 0, 0};
+    Playback player, reference;
+    require(!player.previewPlaying(), "An unloaded player has no active preview");
+    player.load(document);reference.load(document);
+    require(!player.previewPlaying(), "An idle document has no active preview");
+    player.playSong();read(player, 2400);
+    require(player.status().playing && !player.previewPlaying(), "Song voices must not count as preview playback");
+    player.previewSample(1, 0);
+    require(player.previewPlaying() && player.status().playing, "A raw preview is visible independently of a running song");
+    player.stopPreview();
+    require(!player.previewPlaying() && player.status().playing, "Stopping a preview must leave the song transport running");
+    player.stop();
+
+    player.load(document);reference.load(document);
+    player.previewNote(1, 49);reference.previewNote(1, 49);
+    require(player.previewPlaying() && !player.status().playing,
+            "An instrument preview is active immediately without starting the song");
+    for (const auto frames : {1u, 191u, 2400u}) {
+        require(player.previewPlaying(), "Looped instrument audition remains active");
+        require(read(player, frames) == read(reference, frames), "Preview activity queries cannot change PCM or timing");
+    }
+    player.stopPreview();
+    require(!player.previewPlaying(), "Stopping instrument audition clears preview activity");
+
+    player.previewRow(0, 0);
+    require(player.previewPlaying(), "A row preview awaiting its first tick counts as active");
+    read(player, 12000);
+    require(player.previewPlaying(), "A row preview with only a higher-channel sustained voice remains active");
+    player.stopPreview();
+    require(!player.previewPlaying(), "Stopping row audition clears every preview channel");
+
+    auto oneShot = document;
+    oneShot.instruments[0].noteToSample.fill(1);
+    player.load(oneShot);player.previewNote(1, 49);
+    require(player.previewPlaying(), "A new one-shot instrument audition is active");
+    read(player, 9600);
+    require(!player.previewPlaying(), "A naturally finished instrument one-shot allows a fresh Start");
+    player.previewNote(1, 49);
+    require(player.previewPlaying(), "An ended instrument audition can be triggered again");
+    player.stopPreview();player.previewSample(1, 1);
+    require(player.previewPlaying(), "A raw one-shot preview is active before mixing");
+    read(player, 4800);
+    require(!player.previewPlaying(), "A naturally finished raw one-shot is no longer active");
+    player.previewSample(oneShot.instruments[0].samples[1]);
+    require(player.previewPlaying(), "Unsaved draft previews count as preview playback");
+    read(player, 4800);
+    require(!player.previewPlaying(), "A finished unsaved draft no longer counts as active");
+    player.previewRow(0, 0);read(player, 20000);
+    require(!player.previewPlaying(), "A completed row preview with no remaining voices becomes inactive");
+
+    player.load(document);player.previewSample(1, 0);player.stop();
+    require(!player.previewPlaying(), "Stop clears all preview activity");
+    player.previewNote(1, 49);player.load(document);
+    require(!player.previewPlaying(), "Document reload clears all preview activity");
+    player.previewSample(1, 0);player.configure({44100, Interpolation::Linear});
+    require(!player.previewPlaying(), "Changing output settings clears all preview activity");
+
+    // Compatible updates preserve the sounding preview snapshot. PCM edits
+    // apply to its next trigger, while structural updates replace the core.
+    player.configure({});player.load(document);reference.load(document);
+    player.previewSample(1, 0);reference.previewSample(1, 0);
+    require(read(player, 1920) == read(reference, 1920), "Live preview edit fixtures begin identically");
+    auto edited = document;edited.instruments[0].name = "Renamed preview";
+    require(player.updateDocument(edited) == DocumentUpdateResult::Preserved && player.previewPlaying(),
+            "Compatible instrument edits retain active preview playback");
+    edited.instruments[0].samples[0].pcm.assign(96, 0);
+    require(player.updateDocument(edited) == DocumentUpdateResult::Preserved && player.previewPlaying(),
+            "Replacing PCM retains the currently sounding preview until retrigger");
+    require(read(player, 1920) == read(reference, 1920), "A preserved raw voice still uses its original PCM");
+    player.previewSample(1, 0);
+    require(player.previewPlaying() && !audible(read(player, 1920)),
+            "Retriggering applies new PCM; a silent loop is still an active preview");
+    edit::resizeChannels(edited, 3);
+    require(player.updateDocument(edited) == DocumentUpdateResult::IdleReloaded && !player.previewPlaying(),
+            "Structural updates end previews without claiming a song restart");
+}
+
+void samplePreviewPlayhead() {
+    using namespace brick;
+    auto document = fixture();
+    auto& source = document.instruments[0].samples[1];
+    source.pcm.resize(4096);
+    for (std::size_t n = 0; n < source.pcm.size(); ++n) source.pcm[n] = n % 32 < 16 ? 10000 : -10000;
+    document.instruments[0].samples.push_back(Sample{});
+    document.instruments.push_back(document.instruments[0]);
+    document.patterns[0].cells[0] = {49, 1, 0x50, 0, 0};
+    Playback player, reference;
+    const auto inactive = [&] {
+        const auto status = player.samplePreviewStatus();
+        return !status.active && status.instrument == 0 && status.sample == -1 && status.frame == 0;
+    };
+    require(inactive(), "An unloaded sample playhead must be inactive with no stale source identity");
+    player.load(document);reference.load(document);
+    require(inactive(), "Loading a document must not activate its sample playhead");
+
+    player.previewSample(2, 1, 49, 1000, 1800);
+    reference.previewSample(2, 1, 49, 1000, 1800);
+    auto position = player.samplePreviewStatus();
+    require(position.active && position.instrument == 2 && position.sample == 1 && position.frame == 1000,
+            "A range preview starts at its absolute source frame with the correct instrument and slot");
+    require(read(player, 192) == read(reference, 192), "Inspecting the raw playhead must not change preview PCM");
+    position = player.samplePreviewStatus();
+    require(position.active && position.frame > 1000 && position.frame < 1800,
+            "Audio mixing advances the playhead within the absolute selected source range");
+    const auto stationary = player.samplePreviewStatus();
+    require(stationary.frame == position.frame, "Reading a sample playhead does not advance audio");
+    require(read(player, 257) == read(reference, 257), "Repeated playhead queries leave mixer timing unchanged");
+    require(player.samplePreviewStatus().frame > position.frame,
+            "A non-looping preview advances after more frames are mixed");
+    read(player, 12000);
+    require(inactive(), "A completed range preview clears its public playhead and identity");
+
+    player.previewSample(1, 1);read(player, 192);
+    player.previewSample(2, 1, 49, 1500, 2000);
+    position = player.samplePreviewStatus();
+    require(position.active && position.instrument == 2 && position.sample == 1 && position.frame == 1500,
+            "Replacing an active preview must not expose the old position under the new source identity");
+    bool rejected = false;
+    try { player.previewSample(1, 1, 49, 2000, 1500); } catch (const std::exception&) { rejected = true; }
+    position = player.samplePreviewStatus();
+    require(rejected && position.active && position.instrument == 2 && position.frame == 1500,
+            "A rejected preview range preserves the currently active source and position");
+    player.stopPreview();
+    require(inactive() && !audible(read(player, 192)), "Stop Preview hides the raw playhead and silences its voice");
+
+    player.previewSample(1, 1);read(player, 192);player.previewNote(1, 49);
+    require(inactive(), "Instrument audition immediately clears the preceding raw sample playhead");
+    // Instrument volume/frequency are applied at the next tracker tick, which
+    // may be later than the first 192-frame mixer packet. Raw PCM starts sooner.
+    require(audible(read(player, 2400)) && inactive(),
+            "Instrument audition sounds after its clock tick without claiming a raw sample playhead");
+    player.stopPreview();player.previewSample(1, 1);player.previewRow(0, 0);
+    require(inactive(), "Row audition must not inherit a previous raw sample playhead");
+    player.stopPreview();
+    player.previewSample(1, 1);player.previewSample(1, 2);
+    require(inactive(), "Auditioning an empty committed slot clears the preceding raw preview");
+
+    const auto draft = document.instruments[0].samples[1];
+    player.previewSample(2, 1);player.previewSample(draft);
+    position = player.samplePreviewStatus();
+    require(position.active && position.instrument == 0 && position.sample == -1 && position.frame == 0,
+            "An unsaved draft has its own active playhead without claiming a document slot");
+    read(player, 192);
+    require(player.samplePreviewStatus().frame > 0, "Draft preview playheads use actual mixer progress");
+    player.previewSample(Sample{});
+    require(inactive(), "An empty draft clears the previous raw playhead");
+
+    player.previewSample(1, 1);player.stop();
+    require(inactive(), "Stop clears raw preview identity");
+    player.previewSample(1, 1);player.load(document);
+    require(inactive(), "Document reload clears raw preview identity");
+    player.previewSample(1, 1);player.configure({44100, Interpolation::Linear});
+    require(inactive(), "Reconfiguring output clears raw preview identity");
+    player.previewSample(1, 1);
+    auto structural = document;edit::resizeChannels(structural, 3);
+    player.updateDocument(structural);
+    require(inactive(), "Replacing the playback core during an edit clears its old raw playhead");
+    player.load(document);player.playSong();
+    require(inactive(), "Starting a song must not activate the raw preview playhead");
+    require(audible(read(player, 2400)) && inactive(), "Song voices are separate from the raw preview playhead");
+    player.stop();player.configure({});
+
+    for (const int loop : {1, 2, 3}) {
+        auto looped = document;
+        auto& sample = looped.instruments[0].samples[1];
+        sample.loopType = std::uint8_t(loop);sample.loopStart = 64;sample.loopLength = 128;
+        player.load(looped);player.previewSample(1, 1);
+        std::size_t previous = 0;
+        bool movedForward = false, movedBackward = false;
+        for (int n = 0; n < 100; ++n) {
+            read(player, 192);
+            const auto current = player.samplePreviewStatus();
+            require(current.active && current.instrument == 1 && current.sample == 1 && current.frame < 192,
+                    "Forward and ping-pong loops retain a live playhead inside the source loop end");
+            if (n >= 3) require(current.frame >= 64, "A looping playhead cannot return into the pre-loop attack");
+            movedForward = movedForward || current.frame > previous;
+            movedBackward = movedBackward || current.frame < previous;
+            previous = current.frame;
+        }
+        require(movedForward && movedBackward,
+                "Loop playheads must visibly wrap or reverse rather than increase as elapsed time");
+    }
+}
+
 void draftSampleAudition() {
     using namespace brick;
     const auto original = fixture();
@@ -1066,6 +1253,8 @@ void wavAndSdl() {
 int main() {
     try {
         playbackAndAudition();
+        previewActivity();
+        samplePreviewPlayhead();
         draftSampleAudition();
         outputMeter();
         outputMeterClipping();

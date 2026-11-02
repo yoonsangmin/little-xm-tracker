@@ -70,6 +70,7 @@
         numberTitle=std::move(title);numberValue=value;numberMin=lo;numberMax=hi;numberStep=coarse;numberCommit=std::move(apply);numberField=0;mode=Mode::Number;
     }
     void rename(NameTarget target) {
+        playback->stopPreview();
         nameTarget=target;
         if(target==NameTarget::Song)filename=doc.name;
         else if(target==NameTarget::Instrument)filename=currentInstrument()?currentInstrument()->name:"";
@@ -123,6 +124,11 @@
         add(sampleTools,"EXPORT SAMPLE WAV","SAVE THE WHOLE SAMPLE OR SELECTED PCM RANGE",[this]{openSampleExport();});
         add(sampleTools,"RENAME SAMPLE","22 BYTE XM SAMPLE NAME / ASCII INPUT",[this]{rename(NameTarget::Sample);});
         add(sampleTools,"SELECT WHOLE SAMPLE","SELECT EVERY PCM FRAME",[this]{auto* s=currentSample();if(!s)throw std::runtime_error("NO SAMPLE");selectionStart=0;selectionEnd=int(s->pcm.size());});
+        add(sampleTools,"LOOP FROM SELECTION","USE SELECTED START AND END AS A FORWARD LOOP",[this]{
+            if(selectionEnd<=selectionStart)throw std::runtime_error("SELECT A PCM RANGE FIRST");
+            mutate([&]{auto& s=*currentSampleChecked();s.loopStart=std::uint32_t(selectionStart);
+                s.loopLength=std::uint32_t(selectionEnd-selectionStart);s.loopType=1;},"SET LOOP");
+        });
         add(sampleTools,"ZOOM TO SELECTION","",[this]{if(selectionEnd<=selectionStart)throw std::runtime_error("SELECT A PCM RANGE FIRST");waveformZoom=true;});
         add(sampleTools,"SHOW WHOLE WAVEFORM","",[this]{waveformZoom=false;});
         add(sampleTools,"COPY PCM","COPY SELECTION; EMPTY SELECTION MEANS ALL",[this]{pcmClipboard=edit::copyPcm(*currentSampleChecked(),selectedFrames());notify("PCM COPIED");});
@@ -163,7 +169,7 @@
             actions.push_back(groupAction("KEY MAP RANGE","ASSIGN SEVERAL KEYS AT ONCE",select(instrumentTools,{"MAP RANGE FIRST NOTE","MAP RANGE LAST NOTE","ASSIGN RANGE TO SAMPLE"})));
         }else{
             actions.push_back(groupAction("SAMPLE MANAGEMENT","COPY / PASTE / SWAP / DELETE / EXPORT / RECORD",select(sampleTools,{"COPY SAMPLE SLOT","PASTE SAMPLE SLOT","SWAP SAMPLE SLOT","DELETE SAMPLE","EXPORT SAMPLE WAV","RECORD MICROPHONE"})));
-            auto processing=select(sampleTools,{"TRIM SAMPLE TO SELECTION","MINIMISE SAMPLE","REVERSE","CONVERT TO 8-BIT","CONVERT TO 16-BIT","ZOOM TO SELECTION","SHOW WHOLE WAVEFORM","EXPORT SAMPLE WAV"});
+            auto processing=select(sampleTools,{"LOOP FROM SELECTION","TRIM SAMPLE TO SELECTION","MINIMISE SAMPLE","REVERSE","CONVERT TO 8-BIT","CONVERT TO 16-BIT","ZOOM TO SELECTION","SHOW WHOLE WAVEFORM","EXPORT SAMPLE WAV"});
             processing.insert(processing.begin(),groupAction("AMPLITUDE","LEVEL / FADES / POLARITY / DC",select(sampleTools,{"NORMALIZE","GAIN PERCENT","FADE IN","FADE OUT","SILENCE","INVERT POLARITY","REMOVE DC"})));
             actions.push_back(groupAction("PCM PROCESSING","EDIT PCM / TRIM SELECTION / MINIMISE LOOP TAIL",std::move(processing)));
             for(const auto& a:select(sampleTools,{"ADVANCED PCM"}))actions.push_back(a);
@@ -220,7 +226,7 @@
     }
     Envelope& editableEnvelope(){auto& i=editableInstrument(true);return envelopePan?i.panningEnvelope:i.volumeEnvelope;}
     int envelopeButtonColumn=0;
-    void openEnvelope(bool pan){envelopePan=pan;envelopeField=0;envelopePoint=0;envelopeButtonColumn=0;mode=Mode::Envelope;}
+    void openEnvelope(bool pan){playback->stopPreview();envelopePan=pan;envelopeField=0;envelopePoint=0;envelopeButtonColumn=0;mode=Mode::Envelope;}
     void editEnvelope(Button b) {
         auto& e=currentEnvelope();const int sign=(b==Button::Right||b==Button::Up)?1:-1;const bool vertical=b==Button::Up||b==Button::Down;
         aUsed=true;
@@ -264,6 +270,12 @@
             envelopePoint=std::clamp(envelopePoint,0,std::max(0,int(currentEnvelope().count)-1));});
     }
     void envelopeButton(Button b,bool repeating) {
+        if(b==Button::Start) {
+            if(!repeating) {
+                if(playback->previewPlaying())playback->stopPreview();else auditionNote();
+            }
+            return;
+        }
         if((b==Button::A||b==Button::B)&&held[std::size_t(Button::A)]&&held[std::size_t(Button::B)]){
             aUsed=bUsed=true;if(!cutChordUsed&&!repeating){cutChordUsed=true;cutEnvelopePoint();}return;
         }
@@ -273,7 +285,6 @@
             if(b==Button::A&&!repeating){aUsed=true;if(envelopeClipboard)insertEnvelopePointUi(true);}
             return;
         }
-        if(b==Button::A&&!repeating&&envelopeField<9)startHeldNoteAudition();
         if(int(b)<4){
             if(held[std::size_t(Button::A)]){aUsed=true;if(envelopeField<9)editEnvelope(b);}
             else if(b==Button::Up||b==Button::Down) {
@@ -416,7 +427,7 @@
         drawDialogFooter(toolDialogBounds,hints,detail);
     }
     void drawEnvelopeEditor() {
-        const char* hints="A+DPAD EDIT / A+B CUT / SELECT+A PASTE / B BACK / SELECT+LEFT/RIGHT VOLUME/PAN / HOLD A LISTEN / RELEASE A STOP";
+        const char* hints="A+DPAD EDIT / A+B CUT / SELECT+A PASTE / B BACK / SELECT+LEFT/RIGHT VOLUME/PAN / START LISTEN/STOP";
         drawToolPanel(envelopePan?"PANNING ENVELOPE":"VOLUME ENVELOPE",584+controlHeight,hints);const auto& e=currentEnvelope();
         envelope(85,150,530,220,e);
         if(e.count){const int maxX=std::max(1,int(e.points[e.count-1].x));const auto& p=e.points[std::size_t(envelopePoint)];outline(85+int(p.x)*522/maxX-5,150+214-int(p.y)*210/64-5,11,11,amber);}

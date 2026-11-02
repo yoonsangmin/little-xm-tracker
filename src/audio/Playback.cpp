@@ -319,6 +319,8 @@ struct Core {
     std::size_t retiredBytes = 0;
     bool endedVoicesStopped = false;
     int previewPattern = 0, previewRow = 0, previewOverrideChannel = -1;
+    int samplePreviewInstrument = 0, samplePreviewIndex = -1;
+    int samplePreviewFirstFrame = 0, samplePreviewEndFrame = 0;
     std::array<mp_ubyte, 6> previewOverride{};
     std::array<mp_ubyte, 2 * 32 * 6> previewPatternData{};
 
@@ -357,6 +359,12 @@ struct Core {
     void checkInstrument(int instrument) const {
         if (instrument < 1 || static_cast<std::size_t>(instrument) > sampleCounts.size())
             throw std::out_of_range("Playback instrument");
+    }
+    void resetSamplePreview() {
+        sample.resetChannelsFull();
+        samplePreviewInstrument = 0;
+        samplePreviewIndex = -1;
+        samplePreviewFirstFrame = samplePreviewEndFrame = 0;
     }
     void mixAudition(mp_sint32* destination, mp_uint32 frames) {
         if (!audition.needsPreviewPattern()) {
@@ -603,7 +611,7 @@ struct Playback::Impl {
             applyChannelMutes();
             core->song.clearMonitorNotes();
             core->audition.stopAudition();
-            core->sample.resetChannelsFull();
+            core->resetSamplePreview();
             core->sampleDraft.reset();
             core->reclaimRetired();
         }
@@ -909,8 +917,12 @@ void Playback::previewNote(int instrumentOneBased, int noteXm) {
     DeviceLock lock(impl_->device, impl_->stateMutex);
     auto& core = impl_->requireCore();
     core.checkInstrument(instrumentOneBased);
+    const bool hadSamplePreview = core.samplePreviewEndFrame > 0;
+    core.resetSamplePreview();
+    core.sampleDraft.reset();
     if (core.audition.isHeldRowPreview()) core.audition.stopAudition();
     core.audition.playNote(0, noteXm, instrumentOneBased);
+    if (hadSamplePreview && !core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
 }
 
 void Playback::previewRow(int pattern, int row, int overrideChannel, const Cell* overrideCell) {
@@ -925,6 +937,8 @@ void Playback::previewRow(int pattern, int row, int overrideChannel, const Cell*
     const auto& data = core.module.phead[pattern];
     if (data.effnum != 2 || data.channum != core.module.header.channum)
         throw std::runtime_error("Row preview pattern layout");
+    core.resetSamplePreview();
+    core.sampleDraft.reset();
     core.audition.setPatternToPlay(pattern);
     core.audition.setRepeat(true);
     core.audition.restart(0, 0, true);
@@ -947,16 +961,22 @@ void Playback::previewSample(int instrumentOneBased, int sampleIndex, int noteXm
     if (sampleIndex < 0 || static_cast<std::size_t>(sampleIndex) >= core.sampleCounts[instrumentOneBased - 1])
         throw std::out_of_range("Playback sample");
     const auto& sample = core.module.smp[(instrumentOneBased - 1) * 16 + sampleIndex];
-    if (!sample.sample || sample.samplen == 0) return;
+    if (!sample.sample || sample.samplen == 0) {
+        core.resetSamplePreview();
+        core.sampleDraft.reset();
+        if (!core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
+        return;
+    }
     const auto sampleLength = static_cast<int>(sample.samplen);
     const auto rangeEnd = end < 0 ? sampleLength : end;
     if (start < 0 || start >= rangeEnd || rangeEnd > sampleLength)
         throw std::out_of_range("Sample preview range");
-    if (core.sampleDraft) {
-        core.sample.resetChannelsFull();
-        core.sampleDraft.reset();
-        if (!core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
-    }
+    // A live mixer voice otherwise crossfades into a queued replacement while
+    // getSamplePos() still describes the old sample. Start the new audition
+    // immediately, with its normal fade-in and matching source identity.
+    core.resetSamplePreview();
+    core.sampleDraft.reset();
+    if (!core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
     const double semitones = noteXm - 49 + sample.relnote + sample.finetune / 128.0;
     const int frequency = static_cast<int>(std::clamp(8363.0 * std::exp2(semitones / 12.0), 1.0, 384000.0));
     core.sample.setFreq(0, frequency);
@@ -969,6 +989,10 @@ void Playback::previewSample(int instrumentOneBased, int sampleIndex, int noteXm
         if (flags & 3) { loopStart = sample.loopstart; loopEnd = sample.loopstart + sample.looplen; }
     }
     core.sample.playSample(0, sample.sample, sampleLength, start, 0, false, loopStart, loopEnd, flags);
+    core.samplePreviewInstrument = instrumentOneBased;
+    core.samplePreviewIndex = sampleIndex;
+    core.samplePreviewFirstFrame = start;
+    core.samplePreviewEndFrame = rangeEnd;
 }
 
 void Playback::previewSample(const Sample& source, int noteXm) {
@@ -979,7 +1003,7 @@ void Playback::previewSample(const Sample& source, int noteXm) {
     {
         DeviceLock lock(impl_->device, impl_->stateMutex);
         auto& core = impl_->requireCore();
-        core.sample.resetChannelsFull();
+        core.resetSamplePreview();
         core.sampleDraft.swap(replacement);
         const auto& sample = core.sampleDraft->sample;
         if (sample.samplen) {
@@ -992,6 +1016,7 @@ void Playback::previewSample(const Sample& source, int noteXm) {
             const int loopStart = flags & 3 ? sample.loopstart : 0;
             const int loopEnd = flags & 3 ? sample.loopstart + sample.looplen : sample.samplen;
             core.sample.playSample(0, sample.sample, sample.samplen, 0, 0, false, loopStart, loopEnd, flags);
+            core.samplePreviewEndFrame = static_cast<int>(sample.samplen);
         }
         // Replace stale preview PCM immediately while stopped. An in-flight
         // song block must finish normally to retain its transport continuity.
@@ -1004,7 +1029,7 @@ void Playback::stopPreview() {
     DeviceLock lock(impl_->device, impl_->stateMutex);
     if (!impl_->core) return;
     impl_->core->audition.stopAudition();
-    impl_->core->sample.resetChannelsFull();
+    impl_->core->resetSamplePreview();
     impl_->core->sampleDraft.reset();
     if (impl_->core->song.isRowAudition()) {
         impl_->core->song.setIdle(true);
@@ -1012,6 +1037,25 @@ void Playback::stopPreview() {
         impl_->applyChannelMutes();
     }
     impl_->bufferedOffset = impl_->blockFrames;
+}
+
+bool Playback::previewPlaying() const {
+    DeviceLock lock(impl_->device, impl_->stateMutex);
+    if (!impl_->core) return false;
+    auto& core = *impl_->core;
+    if (core.sample.isChannelPlaying(0) || core.audition.needsPreviewPattern()) return true;
+    for (int channel = 0; channel < core.module.header.channum; ++channel)
+        if (core.audition.isChannelPlaying(channel)) return true;
+    return false;
+}
+
+SamplePreviewStatus Playback::samplePreviewStatus() const {
+    DeviceLock lock(impl_->device, impl_->stateMutex);
+    if (!impl_->core) return {};
+    auto& core = *impl_->core;
+    if (!core.sample.isChannelPlaying(0) || core.samplePreviewEndFrame <= core.samplePreviewFirstFrame) return {};
+    const auto frame = std::clamp(core.sample.getSamplePos(0), core.samplePreviewFirstFrame, core.samplePreviewEndFrame - 1);
+    return {true, core.samplePreviewInstrument, core.samplePreviewIndex, static_cast<std::size_t>(frame)};
 }
 
 void Playback::setSolo(int channel) {

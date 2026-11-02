@@ -67,16 +67,23 @@ Select+Left/Right changes screen. Select alone cancels a selection or opens Acti
 UNDO / REDO are at the top of Actions. Notifications include the operation, such as UNDO / CUT.
 Releasing Select after using a combination does not open the menu.
 
-Select+B starts a selection. Extend it with the D-Pad, then press B to copy.
+Select+B starts a selection. In Pattern/Song, extend it with the D-Pad; B copies.
 Repeated Select+B in Pattern: current cell > all rows in the current column > whole pattern > cancel.
 In Song/PCM: range > all > cancel. Canceling a selection does not copy it.
 For selected pattern notes, A+Left/Right transposes by a semitone; A+Up/Down by an octave.
-The sample PROCESS button opens processing options while keeping the selection.
-When a sample range is selected with Select+B, A opens PROCESS directly.
+In Sample, directions always move focus. Select+B focuses selection END; edit
+START/END with A+Left/Right by one frame or A+Up/Down by 1% of sample length.
+END excludes that frame. Moving one endpoint keeps the other fixed.
+B copies, Select cancels and A+B cuts the selection.
+Press A on PROCESS to open tools while keeping the range; no selection means
+the whole sample. PROCESS > LOOP FROM SELECTION makes a Forward loop.
 
 While stopped, Select+Start from any main screen plays the whole song from Order 00, row 00.
 Start in SONG plays from the selected Order; in PATTERN it loops the pattern from row 00,
 or the selected rows if a selection exists. Start or Select+Start while playing stops.
+In INSTRUMENT, SAMPLE, envelope, DRAW and CHOP editors, Start toggles audition.
+A release keeps it playing; a finished one-shot restarts with one Start press.
+If the song is playing, the first Start stops it; press again to audition.
 Select+Start preserves a selection without looping it; follow stays paused while it is active.
 The top bar shows the current BPM and final L/R output meters.
 A+B cuts; Select+A pastes. B+D-Pad navigates patterns, channel pages, instruments and samples.

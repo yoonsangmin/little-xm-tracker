@@ -25,6 +25,7 @@
         return (envelopePan?envelopePresets.panning:envelopePresets.volume).at(std::size_t(envelopePresetSlot));
     }
     void openEnvelopePresets() {
+        playback->stopPreview();
         finishGesture();envelopePresetSlot=std::clamp(envelopePresetSlot,0,5);
         envelopePresetField=envelopePresetSlot;envelopePresetColumns={{-1,-1,0}};
         envelopePresetColumns[std::size_t(envelopePresetField/3)]=envelopePresetField%3;

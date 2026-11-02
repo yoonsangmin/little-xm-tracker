@@ -71,9 +71,17 @@
             require(mode==Mode::Normal&&io::encodeXm(doc)==sampleBefore&&!dirty&&undoStack.empty()&&
                     documentRevision==sampleRevision&&recoverySerial==sampleRecovery&&selectionStart==14&&selectionEnd==18&&waveformZoom,
                     "canceling Minimise retains PCM, selection, zoom and document history");
-            require(pullMinimise(*playback,2048)==pullMinimise(minimiseReference,2048),
-                    "opening and canceling Minimise leaves the existing sample preview running unchanged");
+            pullMinimise(*playback,512);
+            const auto cancelledPreviewPcm=pullMinimise(*playback,2048);
+            require(!playback->previewPlaying()&&std::none_of(cancelledPreviewPcm.begin(),cancelledPreviewPcm.end(),
+                    [](std::int16_t value){return value!=0;}),
+                    "opening Minimise stops the editor preview and canceling does not restart it");
             checkMinimiseClipboards(savedSampleClipboard,savedInstrumentClipboard);
+            tap(Button::Start);
+            const auto resumedPreview=playback->samplePreviewStatus();
+            require(resumedPreview.active&&resumedPreview.instrument==1&&resumedPreview.sample==0&&
+                    resumedPreview.frame>=14&&resumedPreview.frame<18,
+                    "Start after canceling Minimise explicitly auditions the preserved sample selection");
             playback->stopPreview();
             auto expectedSample=doc;expectedSample.instruments[0].samples[0].pcm.resize(10);
             openSampleMinimise();tap(Button::A);

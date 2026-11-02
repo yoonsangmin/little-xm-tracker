@@ -124,6 +124,15 @@
             require(wavePreview&&previewAudible(),"the next Start auditions the modal candidate after song stop");
             tap(Button::B);
 
+            doc=makeDemoDocument();doc.instruments[0].samples[0].loopType=0;
+            selectionStart=selectionEnd=0;playback->load(doc);openWaveDraw();tap(Button::Start);
+            require(previewAudible(),"Start auditions an existing one-shot DRAW sample");
+            previewPcm(48000);
+            require(!playback->previewPlaying(),"one-shot DRAW audition naturally ends");
+            tap(Button::Start);
+            require(previewAudible(),"one Start restarts a naturally finished DRAW sample");
+            tap(Button::B);
+
             playback->stop();stopWavePreview();drawingSample.reset();wavePresetOpen=false;wavePresetDraftPcm.clear();
             doc=previewSavedDocument;page=previewSavedPage;mode=Mode::Normal;
             instrument=previewSavedCursor[0];sample=previewSavedCursor[1];sampleField=previewSavedCursor[2];

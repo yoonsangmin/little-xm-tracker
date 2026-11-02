@@ -28,7 +28,8 @@
             if(selected)rect(tabX+10,36,width-20,2,cyan);
             tabX+=width+6;
         }
-        std::string state = transport.playing ? (transport.rowAudition?"PLAY ROW":transport.loopFirstRow>=0?"PLAY LOOP":playingPattern?"PLAY PATTERN":"PLAY SONG") : "STOP";
+        const bool previewPlaying=playback->previewPlaying();
+        std::string state = transport.playing ? (transport.rowAudition?"PLAY ROW":transport.loopFirstRow>=0?"PLAY LOOP":playingPattern?"PLAY PATTERN":"PLAY SONG") : previewPlaying?"LISTEN":"STOP";
         if(page==Page::Song && !playingPattern){
             const auto seconds=static_cast<std::uint64_t>(std::max(0.0,transport.elapsedSeconds));
             const auto minutes=number(seconds/60),remainder=number(seconds%60);
@@ -58,8 +59,8 @@
             rect(meterX+20,y+4,int(level*meterWidth),7,clipped?red:level>.875f?amber:green);
             rect(meterX+24+meterWidth,y+4,5,7,clipped?red:dim);
         }
-        if (!transport.playing) rect(stateX-18,17,7,7,muted);
-        txt(stateX,14,state,transport.playing?green:muted);
+        if (!transport.playing&&!previewPlaying) rect(stateX-18,17,7,7,muted);
+        txt(stateX,14,state,transport.playing||previewPlaying?green:muted);
     }
 
     static std::string volumeColumnText(std::uint8_t volume) {
@@ -373,13 +374,12 @@
                 "Volume - Default sample volume, 00 to 40", "Panning - Default position, 00 left to FF right",
                 "Finetune - Pitch adjustment in 1/128 semitone", "Relative note - Sample tuning in semitones",
                 "Loop type - Off, forward or ping-pong", "Loop start - First sample frame to repeat",
-                "Loop length - Number of sample frames to repeat", "Selection start - First selected frame",
+                "Loop end - First frame after the repeat range", "Selection start - First selected frame",
                 "Selection end - First frame after the selected range", "Name - Rename this sample",
                 "Load - Import audio", "Draw - Edit PCM or create a short wave",
-                "Play - Hold A to listen; release to stop", "Loop - Use selected range",
+                "", "",
                 "Process - Open tools; keep the selected sample range"};
             context=meanings[std::clamp(sampleField,0,14)];
-            if(pcmSelecting)context="A - Process selected range / B - Copy";
         }
         std::string detail;
         if(page==Page::Pattern) {

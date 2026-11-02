@@ -22,6 +22,40 @@ void checkNotes(int firstNote, std::size_t count) {
             "Chop trigger notes must fit C-0 through B-7");
 }
 
+void checkSource(const Sample& source, FrameRange range, std::size_t count, int firstNote) {
+    require(range.first < range.last && range.last <= source.pcm.size(), "Select a nonempty PCM range to chop");
+    require(range.last - range.first <= maxFrames, "Chop exceeds the 32M-frame memory limit");
+    checkNotes(firstNote, count);
+    require(count <= range.last - range.first, "Chop needs at least one PCM frame per slice");
+    require(source.volume <= 64, "Sample volume is outside the XM range");
+    for (std::size_t n = 0; n < count; ++n) {
+        const int tuning = int(source.relativeNote) - (firstNote + int(n) - 49);
+        require(tuning >= -128 && tuning <= 127, "Chop trigger notes would exceed XM sample tuning range");
+    }
+    if (!source.sixteenBit)
+        for (auto frame = range.first; frame < range.last; ++frame)
+            require(source.pcm[frame] % 256 == 0, "PCM does not match its eight-bit depth");
+}
+
+ChopResult makeSlices(const Sample& source, const std::vector<std::size_t>& boundaries,
+                      int firstNote, int snappedBoundaries) {
+    ChopResult result;
+    result.boundaries = boundaries;result.firstNote = firstNote;result.snappedBoundaries = snappedBoundaries;
+    const auto count = boundaries.size() - 1;
+    result.slices.reserve(count);
+    for (std::size_t n = 0; n < count; ++n) {
+        Sample slice;
+        const auto suffix = std::string(" ") + (n < 9 ? "0" : "") + std::to_string(n + 1);
+        slice.name = text::truncateBytes(source.name.empty() ? std::string("SLICE") : source.name, 22 - suffix.size()) + suffix;
+        slice.sixteenBit = source.sixteenBit;slice.volume = source.volume;slice.panning = source.panning;
+        slice.finetune = source.finetune;slice.reserved = source.reserved;
+        slice.relativeNote = static_cast<std::int8_t>(int(source.relativeNote) - (firstNote + int(n) - 49));
+        slice.pcm.assign(source.pcm.begin() + boundaries[n], source.pcm.begin() + boundaries[n + 1]);
+        result.slices.push_back(std::move(slice));
+    }
+    return result;
+}
+
 std::uint64_t energy(std::int16_t value) {
     const auto signedValue = std::int64_t(value);
     return std::uint64_t(signedValue * signedValue);
@@ -99,44 +133,35 @@ void checkChop(const ChopResult& chop) {
 } // namespace
 
 ChopResult chopSample(const Sample& source, FrameRange range, const ChopOptions& options) {
-    require(range.first < range.last && range.last <= source.pcm.size(), "Select a nonempty PCM range to chop");
-    require(range.last - range.first <= maxFrames, "Chop exceeds the 32M-frame memory limit");
-    checkNotes(options.firstNote, std::size_t(options.count));
+    checkSource(source, range, std::size_t(options.count), options.firstNote);
     const auto count = std::size_t(options.count), length = range.last - range.first;
-    require(count <= length, "Chop needs at least one PCM frame per slice");
-    require(source.volume <= 64, "Sample volume is outside the XM range");
-    for (std::size_t n = 0; n < count; ++n) {
-        const int tuning = int(source.relativeNote) - (options.firstNote + int(n) - 49);
-        require(tuning >= -128 && tuning <= 127, "Chop trigger notes would exceed XM sample tuning range");
-    }
-    if (!source.sixteenBit)
-        for (auto frame = range.first; frame < range.last; ++frame)
-            require(source.pcm[frame] % 256 == 0, "PCM does not match its eight-bit depth");
-
-    ChopResult result;result.firstNote = options.firstNote;
-    result.boundaries.reserve(count + 1);result.slices.reserve(count);
-    for (std::size_t n = 0; n <= count; ++n) result.boundaries.push_back(range.first + length * n / count);
+    std::vector<std::size_t> boundaries;boundaries.reserve(count + 1);
+    for (std::size_t n = 0; n <= count; ++n) boundaries.push_back(range.first + length * n / count);
+    int snappedBoundaries = 0;
     if (options.snapToTransients) {
-        const auto grid = result.boundaries;
+        const auto grid = boundaries;
         const double rate = 8363.0 * std::exp2((double(source.relativeNote) + double(source.finetune) / 128.0) / 12.0);
         const auto maxRadius = std::size_t(rate * 0.025);
         for (std::size_t n = 1; n < count; ++n) {
             const auto radius = std::min(maxRadius, std::min(grid[n] - grid[n - 1], grid[n + 1] - grid[n]) / 4);
-            result.boundaries[n] = nearbyAttack(source, range, grid[n], radius, rate);
-            if (result.boundaries[n] != grid[n]) ++result.snappedBoundaries;
+            boundaries[n] = nearbyAttack(source, range, grid[n], radius, rate);
+            if (boundaries[n] != grid[n]) ++snappedBoundaries;
         }
     }
-    for (std::size_t n = 0; n < count; ++n) {
-        Sample slice;
-        const auto suffix = std::string(" ") + (n < 9 ? "0" : "") + std::to_string(n + 1);
-        slice.name = text::truncateBytes(source.name.empty() ? std::string("SLICE") : source.name, 22 - suffix.size()) + suffix;
-        slice.sixteenBit = source.sixteenBit;slice.volume = source.volume;slice.panning = source.panning;
-        slice.finetune = source.finetune;slice.reserved = source.reserved;
-        slice.relativeNote = static_cast<std::int8_t>(int(source.relativeNote) - (options.firstNote + int(n) - 49));
-        slice.pcm.assign(source.pcm.begin() + result.boundaries[n], source.pcm.begin() + result.boundaries[n + 1]);
-        result.slices.push_back(std::move(slice));
+    return makeSlices(source, boundaries, options.firstNote, snappedBoundaries);
+}
+
+ChopResult chopSampleAtBoundaries(const Sample& source, FrameRange range,
+                                 const std::vector<std::size_t>& boundaries, int firstNote) {
+    require(boundaries.size() >= 2, "Chop needs both range endpoints");
+    checkSource(source, range, boundaries.size() - 1, firstNote);
+    require(boundaries.front() == range.first && boundaries.back() == range.last,
+            "Chop boundaries must span the selected range exactly");
+    for (std::size_t n = 1; n < boundaries.size(); ++n) {
+        require(boundaries[n] > boundaries[n - 1] && boundaries[n] <= range.last,
+                "Chop boundaries must be increasing and inside the selected range");
     }
-    return result;
+    return makeSlices(source, boundaries, firstNote, 0);
 }
 
 int emptySampleSlots(const Instrument& instrument) {

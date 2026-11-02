@@ -329,7 +329,10 @@ struct TrackerApp::Impl {
     void loadEngine() {
         // Every valid XM pattern ID remains browsable, including a pattern
         // that becomes an implicit empty slot after undo or cleanup.
+        const bool refreshPreview=playback->previewPlaying()&&
+            ((mode==Mode::Normal&&(page==Page::Instrument||page==Page::Sample))||mode==Mode::Envelope);
         const auto result=playback->updateDocument(doc);
+        if(refreshPreview){playback->stopPreview();startEditorPreview();}
         if(result==DocumentUpdateResult::Restarted)notify("EDIT APPLIED / PLAYBACK POSITION RESTARTED");
     }
     const char* contextEditLabel() const {
@@ -463,10 +466,18 @@ struct TrackerApp::Impl {
         aPreviewActive = false;
         playback->stopPreview();
     }
-    void startHeldNoteAudition() {
-        if (aPreviewBlocked) return;
-        aPreviewActive = true;
-        auditionNote();
+    void startEditorPreview() {
+        if (page == Page::Instrument || mode == Mode::Envelope) auditionNote();
+        else if (currentSample() && !currentSample()->pcm.empty()) {
+            const bool range = selectionEnd > selectionStart;
+            playback->previewSample(instrument, sample, keymapNote,
+                range ? selectionStart : 0, range ? selectionEnd : -1);
+        } else notify("EMPTY SAMPLE");
+    }
+    void toggleEditorPreview() {
+        finishGesture();
+        if (playback->previewPlaying()) playback->stopPreview();
+        else startEditorPreview();
     }
     void playToggle(bool songFromBeginning = false) {
         finishGesture();
@@ -538,7 +549,7 @@ struct TrackerApp::Impl {
         changePage(value);
     }
     void openMenu(bool contextual = false) {
-        finishGesture(); actions.clear(); menuIndex = 0;
+        finishGesture(); playback->stopPreview(); actions.clear(); menuIndex = 0;
         auto add = [&](std::string label, std::string description, std::function<void()> fn) {
             actions.push_back({std::move(label),std::move(description),std::move(fn)});
         };
@@ -743,30 +754,41 @@ struct TrackerApp::Impl {
         const int nextRow=songFormRow(songField);
         if(nextRow>=0)songRowFocus[std::size_t(nextRow)]=songField;
     }
+    static constexpr std::array<std::array<int,4>,5> sampleFormRows{{
+        {9,10,11,-1},{0,1,-1,-1},{2,3,-1,-1},{5,6,7,8},{4,14,-1,-1}
+    }};
     static int sampleFormRow(int value) {
-        return value<5?value:value<9?value-5:value>=10?4:-1;
+        for(std::size_t r=0;r<sampleFormRows.size();++r)
+            for(int item:sampleFormRows[r])if(item==value&&item>=0)return int(r);
+        return -1;
+    }
+    void rememberSampleFocus() {
+        const int group=sampleField>=9&&sampleField<=11?0:sampleField<=1?1:
+            sampleField<=3?2:sampleField==5||sampleField==6?3:sampleField==7||sampleField==8?4:-1;
+        if(group>=0)sampleRowFocus[std::size_t(group)]=sampleField;
     }
     void navigateSampleForm(Button b) {
+        if(sampleFormRow(sampleField)<0)sampleField=9;
         const int currentRow=sampleFormRow(sampleField);
-        if(currentRow>=0)sampleRowFocus[std::size_t(currentRow)]=sampleField;
+        rememberSampleFocus();
         if(b==Button::Up||b==Button::Down) {
-            if(sampleField==9) {
-                if(b==Button::Down)sampleField=sampleRowFocus[0]>=0?sampleRowFocus[0]:0;
-            } else if(b==Button::Up&&currentRow==0)sampleField=9;
-            else {
-                const int targetRow=std::clamp(currentRow+(b==Button::Down?1:-1),0,4);
-                const bool right=sampleField>=5;
-                const int fallback=targetRow==4?(right?10:4):targetRow+(right?5:0);
-                sampleField=sampleRowFocus[std::size_t(targetRow)]>=0?sampleRowFocus[std::size_t(targetRow)]:fallback;
+            const bool down=b==Button::Down;
+            switch(currentRow) {
+                case 0:if(down)sampleField=sampleRowFocus[1]>=0?sampleRowFocus[1]:sampleField==9?0:1;break;
+                case 1:sampleField=down?(sampleField==0?2:3):(sampleRowFocus[0]>=0?sampleRowFocus[0]:9);break;
+                case 2:if(!down)sampleField=sampleField==2?0:1;
+                    else {const int group=sampleField==2?3:4;sampleField=sampleRowFocus[group]>=0?sampleRowFocus[group]:group==3?5:7;}break;
+                case 3:sampleField=down?(sampleField<=6?4:14):(sampleField<=6?2:3);break;
+                case 4:if(!down){const int group=sampleField==4?3:4;sampleField=sampleRowFocus[group]>=0?sampleRowFocus[group]:group==3?5:7;}break;
             }
-        } else if(currentRow>=0&&currentRow<4) {
-            sampleField=currentRow+(b==Button::Right?5:0);
-        } else if(currentRow==4) {
-            if(b==Button::Right)sampleField=sampleField==4?10:std::min(14,sampleField+1);
-            else sampleField=sampleField==10?4:sampleField>10?sampleField-1:4;
+        } else {
+            const auto& fields=sampleFormRows[std::size_t(currentRow)];
+            const auto found=std::find(fields.begin(),fields.end(),sampleField);
+            const int count=int(std::count_if(fields.begin(),fields.end(),[](int item){return item>=0;}));
+            const int column=int(found-fields.begin());
+            sampleField=fields[std::size_t(std::clamp(column+(b==Button::Right?1:-1),0,count-1))];
         }
-        const int nextRow=sampleFormRow(sampleField);
-        if(nextRow>=0)sampleRowFocus[std::size_t(nextRow)]=sampleField;
+        rememberSampleFocus();
     }
     void normalDirection(Button b) {
         const bool edit=held[static_cast<std::size_t>(Button::A)];
@@ -774,10 +796,6 @@ struct TrackerApp::Impl {
         const bool vertical=b==Button::Up||b==Button::Down;
         if(page!=Page::Pattern||edit||vertical||hasSelection())followPlayback=false;
         if(page==Page::Instrument&&instrumentPanelDirection(b,edit))return;
-        if(pcmSelecting&&page==Page::Sample&&!edit){
-            if(auto* pcm=currentSample())selectionEnd=std::clamp(selectionEnd+((b==Button::Down||b==Button::Right)?1:-1)*(vertical?256:1),selectionStart,int(pcm->pcm.size()));
-            return;
-        }
         if(edit){
             aUsed=true;
             if(page==Page::Pattern){
@@ -826,7 +844,11 @@ struct TrackerApp::Impl {
             }else if(page==Page::Instrument){
                 if(instrumentField>7)return;
                 if(instrumentField==0){sample=std::clamp(sample+sign,0,15);selectionStart=selectionEnd=0;return;}
-                if(instrumentField==1){keymapNote=std::clamp(keymapNote+sign*(vertical?12:1),1,96);return;}
+                if(instrumentField==1){
+                    const int next=std::clamp(keymapNote+sign*(vertical?12:1),1,96);
+                    if(next!=keymapNote){keymapNote=next;if(playback->previewPlaying())auditionNote();}
+                    return;
+                }
                 const auto* existing=currentInstrument();
                 const int oldValue=!existing?0:instrumentField==2?existing->noteToSample[keymapNote-1]:instrumentField==3?existing->fadeout:
                     instrumentField==4?existing->vibratoDepth:instrumentField==5?existing->vibratoRate:instrumentField==6?existing->vibratoType:existing->vibratoSweep;
@@ -855,16 +877,47 @@ struct TrackerApp::Impl {
                 }
                 int delta=sign*(vertical?16:1);
                 int frameDelta=sign*(vertical?std::max(1,int(s->pcm.size()/100)):1);
-                if(sampleField==7){selectionStart=std::clamp(selectionStart+frameDelta,0,int(s->pcm.size()));selectionEnd=std::max(selectionEnd,selectionStart);return;}
-                if(sampleField==8){selectionEnd=std::clamp(selectionEnd+frameDelta,selectionStart,int(s->pcm.size()));return;}
+                const int length=int(s->pcm.size());
+                if(sampleField>=4&&!length)return;
+                if(sampleField==7||sampleField==8){
+                    const bool selected=selectionEnd>selectionStart;
+                    selectionStart=std::clamp(selectionStart,0,length-1);
+                    if(sampleField==7){
+                        selectionStart=std::clamp(selectionStart+frameDelta,0,selected?selectionEnd-1:length-1);
+                        if(!selected)selectionEnd=selectionStart+1;
+                    } else selectionEnd=std::clamp(selectionEnd+frameDelta,selectionStart+1,length);
+                    rememberSampleFocus();return;
+                }
                 beginGesture();
                 if(sampleField==0)s->volume=std::uint8_t(std::clamp(int(s->volume)+delta,0,64));
                 if(sampleField==1)s->panning=std::uint8_t(std::clamp(int(s->panning)+delta,0,255));
                 if(sampleField==2)s->finetune=std::int8_t(std::clamp(int(s->finetune)+delta,-128,127));
                 if(sampleField==3)s->relativeNote=std::int8_t(std::clamp(int(s->relativeNote)+sign*(vertical?12:1),-96,95));
-                if(sampleField==4){s->loopType=std::uint8_t(std::clamp(int(s->loopType)+sign,0,2));if(s->pcm.empty())s->loopType=0;if(s->loopType&&s->loopLength==0){s->loopStart=0;s->loopLength=std::uint32_t(s->pcm.size());}}
-                if(sampleField==5){int last=int(s->pcm.size())-(s->loopType?1:0);s->loopStart=std::uint32_t(std::clamp(int(s->loopStart)+frameDelta,0,std::max(0,last)));s->loopLength=std::min(s->loopLength,std::uint32_t(s->pcm.size())-s->loopStart);if(s->loopType)s->loopLength=std::max<std::uint32_t>(1,s->loopLength);}
-                if(sampleField==6)s->loopLength=std::uint32_t(std::clamp(int(s->loopLength)+frameDelta,s->loopType?1:0,int(s->pcm.size())-int(s->loopStart)));
+                if(sampleField==4){
+                    s->loopType=std::uint8_t(std::clamp(int(s->loopType)+sign,0,2));
+                    if(s->loopType){
+                        if(!s->loopLength){s->loopStart=0;s->loopLength=std::uint32_t(length);}
+                        else {
+                            const auto end=std::uint64_t(s->loopStart)+s->loopLength;
+                            s->loopStart=std::min(s->loopStart,std::uint32_t(length-1));
+                            s->loopLength=std::uint32_t(std::clamp(end,std::uint64_t(s->loopStart)+1,std::uint64_t(length))-s->loopStart);
+                        }
+                    }
+                }
+                if(sampleField==5||sampleField==6){
+                    const bool hasLoop=s->loopLength>0;
+                    // Disabled XM loop markers may lie outside PCM. Preserve
+                    // them until edited, then normalize before signed arithmetic.
+                    int first=int(std::min(s->loopStart,std::uint32_t(length-1)));
+                    int end=int(std::clamp(std::uint64_t(s->loopStart)+s->loopLength,
+                        std::uint64_t(first)+1,std::uint64_t(length)));
+                    if(sampleField==5){
+                        first=std::clamp(first+frameDelta,0,hasLoop?end-1:length-1);
+                        if(!hasLoop)end=first+1;
+                    } else end=std::clamp(end+frameDelta,first+1,length);
+                    s->loopStart=std::uint32_t(first);s->loopLength=std::uint32_t(end-first);
+                    rememberSampleFocus();
+                }
             }
         }else{
             if(page==Page::Pattern){
@@ -976,14 +1029,15 @@ struct TrackerApp::Impl {
             followPlayback=false;
             if(!repeating){
                 if(page==Page::Pattern&&field==0){insertHeldNote();auditionPatternNote();}
-                else if(page==Page::Instrument&&(instrumentField<8||instrumentField==14))startHeldNoteAudition();
-                else if(page==Page::Sample&&!pcmSelecting&&(sampleField<9||sampleField==12)&&currentSample()){
-                    aPreviewActive=true;activateSampleField();
-                }
             }
         }
         if(int(b)<4){normalDirection(b);return;}
-        if(b==Button::Start){playToggle();return;}
+        if(b==Button::Start){
+            if(repeating)return;
+            if(page==Page::Instrument||page==Page::Sample)toggleEditorPreview();
+            else playToggle();
+            return;
+        }
         // Empty notes appear on A-down. Other taps wait for release so
         // an A-first chord cannot accidentally activate a button.
     }
@@ -1038,7 +1092,7 @@ struct TrackerApp::Impl {
             else{v.effect=lastCell.effect;v.param=lastCell.param;editCell(v);}
         }else if(page==Page::Song)activateSongField();
         else if(page==Page::Instrument){if(instrumentField>=8)activateInstrumentField();}
-        else if(pcmSelecting||!(sampleField<9||sampleField==12))activateSampleField();
+        else if(sampleField>=9)activateSampleField();
     }
     static const std::string& nameKeys() { static const std::string keys="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- .!()+";return keys; }
     void cancelName() {mode=nameTarget==NameTarget::Theme?Mode::ThemeFiles:nameTarget==NameTarget::File?Mode::Browser:Mode::Normal;}
@@ -1142,14 +1196,12 @@ struct TrackerApp::Impl {
     }
     void drawSample() {
         auto* s=currentSample();
-        rect(20,52,984,controlHeight,sampleField==9?panel2:bg);
+        rect(20,52,732,controlHeight,sampleField==9?panel2:bg);
         if(sampleField==9)rect(20,52,focusBarWidth,controlHeight,amber);
         txt(34,52+controlTextY,"NAME",sampleField==9?amber:muted);
-        txt(112,52+controlTextY,s?ui::fit(text::xmDisplayText(s->name),70):"EMPTY SAMPLE",sampleField==9?amber:ink);
-        const char* buttons[]={"LOAD","DRAW","PLAY","LOOP","PROCESS"};
-        for(int n=0;n<5;++n){const int x=517+n*98;const bool active=sampleField==n+10;
-            drawButton(x,656,93,buttons[n],active);
-        }
+        txt(112,52+controlTextY,s?ui::fit(text::xmDisplayText(s->name),52):"EMPTY SAMPLE",sampleField==9?amber:ink);
+        drawButton(760,52,118,"LOAD",sampleField==10);
+        drawButton(886,52,118,"DRAW",sampleField==11);
         Sample empty;if(!s)s=&empty;
         const int x=30,y=103,ww=964,hh=284;rect(20,96,984,302,panel);
         line(x,y+hh/2,x+ww,y+hh/2,dim);
@@ -1159,7 +1211,6 @@ struct TrackerApp::Impl {
             const auto visibleFrames=lastFrame-firstFrame;
             auto frameX=[&](std::size_t f){const auto clipped=std::clamp(f,firstFrame,lastFrame);return x+int((clipped-firstFrame)*std::size_t(ww)/visibleFrames);};
             if(selectionEnd>selectionStart)rect(frameX(selectionStart),y,std::max(1,frameX(selectionEnd)-frameX(selectionStart)),hh,sampleSelectionColor);
-            if(s->loopType&&s->loopLength){int a=frameX(s->loopStart),b=frameX(s->loopStart+s->loopLength);line(a,y,a,y+hh,amber);line(b,y,b,y+hh,amber);}
             if(visibleFrames<=std::size_t(ww)) {
                 // At this zoom, connect actual PCM points on the same time axis
                 // as selection/loop boundaries; isolated min/max pixels look dashed.
@@ -1178,13 +1229,54 @@ struct TrackerApp::Impl {
                     line(x+px,y+hh/2-int(mm.second)*(hh/2-10)/32768,x+px,y+hh/2-int(mm.first)*(hh/2-10)/32768,cyan);
                 }
             }
+            const bool loopFocus=sampleField>=4&&sampleField<=6;
+            const bool selectionFocus=sampleField==7||sampleField==8||sampleField==14;
+            auto markers=[&](std::size_t first,std::size_t last,bool focused,int firstField,int lastField){
+                const std::array<std::size_t,2> frames{{first,last}};
+                const std::array<int,2> fields{{firstField,lastField}};
+                for(int n=0;n<2;++n)if(frames[n]>=firstFrame&&frames[n]<=lastFrame){
+                    const auto color=focused?(sampleField==fields[n]?amber:ink):dim;
+                    const int px=frameX(frames[n]);line(px,y,px,y+hh,color);
+                    if(focused)rect(px-2,y,5,5,color);
+                }
+            };
+            auto loopMarkers=[&]{if(s->loopLength&&(s->loopType||loopFocus))markers(s->loopStart,std::uint64_t(s->loopStart)+s->loopLength,loopFocus,5,6);};
+            auto selectionMarkers=[&]{if(selectionEnd>selectionStart)markers(selectionStart,selectionEnd,selectionFocus,7,8);};
+            // Keep the range currently being edited visible when boundaries overlap.
+            if(loopFocus){selectionMarkers();loopMarkers();}else{loopMarkers();selectionMarkers();}
+            const auto preview=playback->samplePreviewStatus();
+            if(preview.active&&preview.instrument==instrument&&preview.sample==sample&&
+                preview.frame>=firstFrame&&preview.frame<lastFrame) {
+                const int cursorX=frameX(preview.frame);
+                line(cursorX,y,cursorX,y+hh,ink);
+                rect(cursorX-2,y+hh-4,5,5,ink);
+            }
         }
         txt(30,410,number(int(s->pcm.size()))+" FRAMES  /  "+(s->sixteenBit?"16-BIT":"8-BIT")+" MONO",muted);
         txt(800,410,waveformZoom?"SELECTION":"FULL SAMPLE",muted);
         const char* loopNames[]={"OFF","FORWARD","PING-PONG"};
-        const std::array<std::string,9> labels={"VOLUME","PANNING","FINETUNE","RELATIVE NOTE","LOOP TYPE","LOOP START","LOOP LENGTH","SELECT START","SELECT END"};
-        const std::array<std::string,9> values={hex(s->volume),hex(s->panning),number(s->finetune),number(s->relativeNote),loopNames[std::min<int>(2,s->loopType)],number(s->loopStart),number(s->loopLength),number(selectionStart),number(selectionEnd)};
-        for(int n=0;n<9;++n){int col=n/5,rr=n%5;labelValue(20+col*497,440+rr*54,labels[n],values[n],sampleField==n,487);}
+        labelValue(20,440,"VOLUME",hex(s->volume),sampleField==0,487);
+        labelValue(517,440,"PANNING",hex(s->panning),sampleField==1,487);
+        labelValue(20,494,"FINETUNE",number(s->finetune),sampleField==2,487);
+        labelValue(517,494,"RELATIVE NOTE",number(s->relativeNote),sampleField==3,487);
+        for(int side=0;side<2;++side){
+            const int left=20+side*497;
+            rect(left,548,487,146,panel);outline(left,548,487,146,panel2);
+            txt(left+14,560,side?"SELECTION":"LOOP",cyan);
+        }
+        auto rangeField=[&](int left,int top,int width,const char* label,std::string value,int fieldId){
+            const bool active=sampleField==fieldId;
+            rect(left,top,width,controlHeight,active?panel2:bg);
+            if(active)rect(left,top,focusBarWidth,controlHeight,amber);
+            txt(left+14,top+controlTextY,label,active?ink:muted);
+            txt(left+width-14-ui::textWidth(value),top+controlTextY,value,active?amber:cyan);
+        };
+        rangeField(32,590,225,"START",number(s->loopStart),5);
+        rangeField(269,590,226,"END",number(std::uint64_t(s->loopStart)+s->loopLength),6);
+        rangeField(32,644,463,"TYPE",loopNames[std::min<int>(2,s->loopType)],4);
+        rangeField(529,590,225,"START",number(selectionStart),7);
+        rangeField(766,590,226,"END",number(selectionEnd),8);
+        drawButton(529,644,463,"PROCESS",sampleField==14);
     }
     void overlay() {SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_BLEND);rect(0,0,W,H,overlayColor);SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_NONE);}
     void drawMenu() {
@@ -1280,6 +1372,7 @@ struct TrackerApp::Impl {
             rows.push_back("DOWN BELOW BUTTONS    ENTER CHANNEL MONITOR");
             rows.push_back("MONITOR: DPAD         CHANNEL; UP AT TOP: RETURN");
         } else if(page==Page::Instrument) {
+            rows[7]="START                 LISTEN / STOP";
             rows[5]="ACTIONS > INSTRUMENT MANAGEMENT";
             rows[6]="COPY / PASTE INSTRUMENT (WHOLE SLOT)";
             rows.push_back("B+UP/DOWN             INSTRUMENT NUMBER");
@@ -1289,12 +1382,13 @@ struct TrackerApp::Impl {
             rows.push_back("A ON KEY MAP/SETTINGS SWITCH INSTRUMENT VIEW");
             rows.push_back("SAMPLE LIST: A OPEN / A+B DELETE SLOT");
         } else {
+            rows[7]="START                 LISTEN TO SAMPLE / SELECTION; STOP";
             rows.push_back("B+UP/DOWN             SAMPLE SLOT");
             rows.push_back("B+LEFT/RIGHT          OWNER INSTRUMENT");
             rows[5]="HOLD SELECT, TAP B    SELECT / EXPAND / CANCEL PCM";
             rows.push_back("A ON PROCESS          PROCESS SELECTED PCM");
             rows.push_back("A ON DRAW             OPEN DRAW");
-            rows.push_back("HOLD A ON PLAY        LISTEN; RELEASE A TO STOP");
+            rows.push_back("PCM RANGE: DPAD FOCUS / A+DPAD EDIT START OR END");
         }
         if(page==Page::Pattern||page==Page::Song) {
             rows.push_back("HOLD B, TAP SELECT    MUTE / UNMUTE CHANNEL");
@@ -1600,6 +1694,8 @@ struct TrackerApp::Impl {
 #include "../../tests/browser_folders_ui_checks.inc"
 #include "../../tests/undo_labels_ui_checks.inc"
 #include "../../tests/main_navigation_ui_checks.inc"
+#include "../../tests/sample_layout_ui_checks.inc"
+#include "../../tests/instrument_layout_ui_checks.inc"
 #include "../../tests/brick_feedback_ui_checks.inc"
 #include "../../tests/waveform_view_ui_checks.inc"
 #include "../../tests/wave_preview_ui_checks.inc"

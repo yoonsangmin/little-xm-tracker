@@ -26,6 +26,13 @@ struct ChopResult {
 // Invalid ranges/counts/trigger notes or tuning overflow throw, without mutation.
 ChopResult chopSample(const Sample& source, FrameRange range, const ChopOptions& options = {});
 
+// Apply edited absolute boundaries without changing or snapping them. They
+// must span range exactly and define 1..16 strictly increasing nonempty slices.
+// Uses the same metadata and trigger-note tuning as chopSample. Build only on
+// Apply; a UI draft can move/add/remove boundaries without copying any PCM.
+ChopResult chopSampleAtBoundaries(const Sample& source, FrameRange range,
+                                 const std::vector<std::size_t>& boundaries, int firstNote = 49);
+
 struct ChopPlacement {
     Instrument instrument;
     std::vector<int> slots; // Zero-based destination sample slots.

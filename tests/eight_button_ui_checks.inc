@@ -245,16 +245,19 @@
             tap(Button::B);
             require(pcmClipboard&&pcmClipboard->pcm.size()==4&&!hasSelection(),
                     "B copies a manually selected sample range and removes its selection highlight");
-            selectionStart=4;selectionEnd=8;sampleField=13;
-            tap(Button::Right);require(sampleField==14,"the Process button is reachable after Loop");
+            selectionStart=4;selectionEnd=8;sampleField=8;
+            tap(Button::Down);require(sampleField==14,"the Process button is directly below the selection endpoints");
             tap(Button::A);
             require(mode==Mode::Menu&&menuTitle=="SAMPLE PROCESS"&&menuParents.empty()&&
                     selectionStart==4&&selectionEnd==8&&actions[0].label=="UNDO"&&actions[1].label=="REDO",
                     "Process opens directly with Undo/Redo and preserves the manual sample range");
             tap(Button::B);require(mode==Mode::Normal&&hasSelection(),"B from Process returns to the selected sample");
             selectChord(Button::B);tap(Button::A);
+            require(mode==Mode::Normal&&sampleField==8&&selectionStart==4&&selectionEnd==8,
+                    "A on a selected PCM endpoint stays on that field without opening a menu");
+            tap(Button::Down);tap(Button::A);
             require(mode==Mode::Menu&&menuTitle=="SAMPLE PROCESS"&&!pcmSelecting&&selectionStart==4&&selectionEnd==8,
-                    "A while marking a PCM range opens processing without copying or clearing it");
+                    "A on Process opens the retained PCM range without copying or clearing it");
             tap(Button::B);tap(Button::Select);require(!hasSelection()&&mode==Mode::Normal,"Select cancels the retained range after closing Process");
 
             resetEightButtons();clipboard=Cell{75,1,0x30,4,0x32};

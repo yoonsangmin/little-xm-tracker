@@ -130,6 +130,99 @@ void invalidRequests() {
     check(sameSample(source, highBefore), "Tuning overflow rejects the whole chop without source changes");
 }
 
+void manualBoundariesAndXi() {
+    using namespace brick;
+    for(const bool sixteenBit:{false,true}) {
+        auto source=sequence(35);source.name="MANUAL CHOP";
+        source.sixteenBit=sixteenBit;source.volume=37;source.panning=205;
+        source.relativeNote=12;source.finetune=-43;source.reserved=7;
+        source.loopType=2;source.loopStart=4;source.loopLength=20;
+        if(!sixteenBit)
+            for(std::size_t n=0;n<source.pcm.size();++n)source.pcm[n]=static_cast<std::int16_t>((int(n)-17)*256);
+        const auto before=source;const auto sourceBytes=sampleXi(source);
+        const edit::FrameRange range{3,30};
+        const auto automatic=edit::chopSample(source,range,{4,false,37});
+        const auto unchanged=edit::chopSampleAtBoundaries(source,range,automatic.boundaries,37);
+        for(std::size_t n=0;n<automatic.slices.size();++n)
+            check(sameSample(automatic.slices[n],unchanged.slices[n]),"Applying an unchanged boundary draft retains automatic slice metadata and PCM");
+
+        auto boundaries=automatic.boundaries;
+        boundaries[1]=11;
+        const auto moved=edit::chopSampleAtBoundaries(source,range,boundaries,37);
+        check(moved.boundaries==std::vector<std::size_t>({3,11,16,23,30}),"Moving a manual cut uses its exact frame without snapping");
+        boundaries.insert(boundaries.begin()+3,20);
+        const auto added=edit::chopSampleAtBoundaries(source,range,boundaries,37);
+        check(added.slices.size()==5&&added.boundaries[3]==20,"Adding a boundary splits its containing slice");
+        boundaries.erase(boundaries.begin()+2);
+        const auto merged=edit::chopSampleAtBoundaries(source,range,boundaries,37);
+        check(merged.slices.size()==4&&merged.slices[1].pcm==std::vector<std::int16_t>(source.pcm.begin()+11,source.pcm.begin()+20),
+              "Deleting a boundary merges the adjacent PCM spans without removing either side");
+        for(const auto* result:{&moved,&added,&merged}) {
+            conserved(source,range,*result);
+            check(result->firstNote==37&&result->snappedBoundaries==0,"Manual boundaries keep the trigger start and claim no automatic snaps");
+            for(std::size_t n=0;n<result->slices.size();++n) {
+                const auto& slice=result->slices[n];
+                check(slice.sixteenBit==source.sixteenBit&&slice.volume==source.volume&&slice.panning==source.panning&&
+                      slice.finetune==source.finetune&&slice.reserved==source.reserved,
+                      "Manual slicing preserves depth, volume, panning, finetune and reserved metadata");
+                check(int(slice.relativeNote)+result->firstNote+int(n)-49==source.relativeNote,
+                      "Added and merged slices compensate their newly consecutive trigger notes");
+                check(slice.loopType==0&&slice.loopStart==0&&slice.loopLength==0,"Manual slices clear inherited loop markers");
+            }
+        }
+        const auto single=edit::chopSampleAtBoundaries(source,range,{3,30});
+        check(single.firstNote==49&&single.slices.size()==1&&single.slices[0].relativeNote==source.relativeNote,
+              "Two endpoints alone create one non-resampled slice at the default C-4 trigger");
+        conserved(source,range,single);
+
+        Instrument target;target.name="KEEP";target.samples.push_back(sequence(3));
+        const auto targetBytes=io::encodeXi(target);
+        const auto placed=edit::placeChop(target,added);
+        check(placed.slots==std::vector<int>({1,2,3,4,5}),"Manual slices use the existing vacancy-based placement path");
+        const auto placedBytes=io::encodeXi(placed.instrument);
+        const auto reopened=io::decodeXi(placedBytes);
+        check(io::encodeXi(reopened)==placedBytes,"Manual slice placement preserves exact XI data through save and reload");
+        for(std::size_t n=0;n<added.slices.size();++n)
+            check(reopened.noteToSample[36+n]==std::uint8_t(placed.slots[n])&&
+                  sameSample(reopened.samples[std::size_t(placed.slots[n])],added.slices[n]),
+                  "Reopened XI keeps manual slice PCM, metadata and trigger mappings");
+        check(io::encodeXi(target)==targetBytes&&sameSample(source,before)&&sampleXi(source)==sourceBytes,
+              "Moving, adding, merging and placing cuts never mutate the source sample or target instrument");
+    }
+}
+
+void invalidManualBoundaries() {
+    using namespace brick;
+    auto source=sequence(32);const auto before=source;const auto sourceBytes=sampleXi(source);
+    for(const auto& boundaries:std::vector<std::vector<std::size_t>>{
+            {},{0},{1,16,32},{0,16,31},{0,16,16,32},{0,20,12,32},
+            {0,33,32},{0,std::numeric_limits<std::size_t>::max(),32}})
+        reject([&]{edit::chopSampleAtBoundaries(source,{0,32},boundaries);},
+               "Incomplete, duplicate, reversed or out-of-range manual boundaries must be rejected");
+    std::vector<std::size_t> sixteen;
+    for(std::size_t n=0;n<=16;++n)sixteen.push_back(n*2);
+    const auto maximum=edit::chopSampleAtBoundaries(source,{0,32},sixteen,81);
+    check(maximum.slices.size()==16&&maximum.firstNote==81,"Sixteen manual slices can occupy the final sixteen XM notes");
+    conserved(source,{0,32},maximum);
+    auto seventeen=sixteen;seventeen.insert(seventeen.begin()+1,1);
+    reject([&]{edit::chopSampleAtBoundaries(source,{0,32},seventeen);},"A seventeenth manual slice exceeds XI capacity");
+    for(const edit::FrameRange range:std::array<edit::FrameRange,4>{{{5,5},{9,4},{0,33},{0,std::numeric_limits<std::size_t>::max()}}})
+        reject([&]{edit::chopSampleAtBoundaries(source,range,{range.first,range.last});},"Invalid selected ranges cannot be hidden by matching endpoints");
+    for(const int note:{0,97,std::numeric_limits<int>::min(),std::numeric_limits<int>::max()})
+        reject([&]{edit::chopSampleAtBoundaries(source,{0,32},{0,16,32},note);},"Manual slices require a valid playable first trigger note");
+    reject([&]{edit::chopSampleAtBoundaries(source,{0,32},{0,8,16,24,32},94);},"Manual trigger mappings cannot cross B-7");
+    reject([&]{edit::chopSampleAtBoundaries(Sample{},{0,0},{0,0});},"An empty source cannot form a manual slice");
+    auto invalid=source;invalid.volume=65;
+    reject([&]{edit::chopSampleAtBoundaries(invalid,{0,32},{0,16,32});},"Manual slicing rejects non-XM volume");
+    invalid=source;invalid.sixteenBit=false;
+    reject([&]{edit::chopSampleAtBoundaries(invalid,{0,32},{0,16,32});},"Manual slicing never silently quantizes invalid eight-bit PCM");
+    invalid=source;invalid.relativeNote=-128;
+    reject([&]{edit::chopSampleAtBoundaries(invalid,{0,32},{0,16,32});},"Added trigger tuning cannot underflow relative note");
+    invalid=source;invalid.relativeNote=127;
+    reject([&]{edit::chopSampleAtBoundaries(invalid,{0,32},{0,32},48);},"Manual trigger tuning cannot overflow relative note");
+    check(sameSample(source,before)&&sampleXi(source)==sourceBytes,"Rejected manual boundary edits preserve the source and its exact XI bytes");
+}
+
 void onsetSnapping() {
     using namespace brick;
     Sample attacks; attacks.pcm.resize(1600);
@@ -256,7 +349,7 @@ void placementAndXi() {
 
 int main() {
     try {
-        equalDivisionAndTuning(); invalidRequests(); onsetSnapping(); placementAndXi();
+        equalDivisionAndTuning(); invalidRequests(); manualBoundariesAndXi(); invalidManualBoundaries(); onsetSnapping(); placementAndXi();
         std::cout << "Sample chop passed: " << checks << " checks\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

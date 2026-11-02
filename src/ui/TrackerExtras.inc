@@ -161,17 +161,17 @@
         } catch(...) {stopWavePreview();throw;}
     }
     void toggleWavePreview() {
-        if(wavePreview)stopWavePreview();
+        if(wavePreview&&playback->previewPlaying())stopWavePreview();
         else {wavePreview=true;refreshWavePreview();}
     }
     std::string wavePreviewHint(std::string_view hint) const {
         const auto split=hint.rfind(" / B ");
-        const std::string listen=wavePreview?" / START STOP":" / START LISTEN";
+        const std::string listen=wavePreview&&playback->previewPlaying()?" / START STOP":" / START LISTEN";
         return split==std::string_view::npos?std::string(hint)+listen:
             std::string(hint.substr(0,split))+listen+std::string(hint.substr(split));
     }
     void drawWavePreviewStatus() {
-        if(wavePreview)txt(924-ui::textWidth("LISTENING"),99,"LISTENING",cyan);
+        if(wavePreview&&playback->previewPlaying())txt(924-ui::textWidth("LISTENING"),99,"LISTENING",cyan);
     }
     int waveDrawPointFrame(int index) const {
         const int count=waveDrawPointCount();
@@ -413,7 +413,7 @@
         add(sampleTools,"SWAP SAMPLE SLOT","EXCHANGE SAMPLE CONTENTS WITHIN OR BETWEEN INSTRUMENTS",[this]{swapSampleSlot();});
         std::vector<Action> advanced;
         add(advanced,"DETECT PITCH","ANALYZE SELECTED PCM OR WHOLE SAMPLE; REVIEW BEFORE TUNING",[this]{openPitchDetection();});
-        add(advanced,"CHOP SAMPLE","2 TO 16 SLICES / EXACT EQUAL OR OPTIONAL ATTACK SNAP",[this]{openSampleChop();});
+        add(advanced,"CHOP SAMPLE","UP TO 16 SLICES / AUTO SPLIT AND EDIT CUTS",[this]{openSampleChop();});
         add(advanced,"LOOP CROSSFADE","SELECT ACROSS LOOP START; MATCHING LOOP END RANGE MUST FIT",[this]{
             const auto range=selectedFrames(false);mutate([&]{edit::crossfadeLoop(*currentSample(),range);});notify("LOOP CROSSFADE APPLIED");
         });

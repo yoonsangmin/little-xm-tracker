@@ -31,7 +31,7 @@
             auto auditionSilent=[&]{
                 // Allow a brief de-click ramp, but never an envelope release tail.
                 pullAudition(*playback,512);
-                require(!auditionAudible(pullAudition(*playback,2048)),"ending held audition silences PCM without an envelope release tail");
+                require(!auditionAudible(pullAudition(*playback,2048)),"ending audition silences PCM without an envelope release tail");
             };
             auto openAuditionSetting=[&]{
                 menu("SETTINGS");
@@ -204,21 +204,77 @@
                 require(cell().note==0&&undoStack.size()==cutUndo+1,"cut-chord release never reinserts or retriggers the removed note");
             }
 
-            // These normal fields share the held lifecycle. Analysis LISTEN
-            // buttons are explicit actions and retain their separate behavior.
+            // Instrument, sample and envelope listening uses a Start toggle.
+            // Pattern note entry keeps its independent A-held lifecycle above.
             patternRowAudition=false;keymapNote=49;instrument=1;sample=0;
             for(int auditionView=0;auditionView<3;++auditionView) {
                 if(auditionView==0){changePage(Page::Instrument);instrumentField=0;}
                 else if(auditionView==1){changePage(Page::Sample);sampleField=0;selectionStart=selectionEnd=0;pcmSelecting=false;}
                 else{menu("VOLUME ENVELOPE");envelopeField=0;}
                 const auto beforeView=io::encodeXm(doc);const auto viewUndo=undoStack.size();
+                tap(Button::A);auditionSilent();
+                tap(Button::Start);
+                require(!playback->status().playing&&!aPreviewActive&&auditionAudible(pullAudition(*playback,3000)),
+                        "Start auditions instrument, sample and envelope independently of pattern transport and A-held preview");
                 buttonInput(Button::A,true);
-                require(auditionAudible(pullAudition(*playback,3000)),"normal instrument, sample and envelope previews begin on A-down");
-                buttonInput(Button::A,false);auditionSilent();
+                require(auditionAudible(pullAudition(*playback,3000)),"Pressing A while listening does not stop a Start audition");
+                buttonInput(Button::A,false);
+                require(auditionAudible(pullAudition(*playback,3000)),"Releasing A leaves the Start audition playing");
+                tap(Button::Start);auditionSilent();
+                playback->playSong(0,0);pullAudition(*playback,1000);
+                tap(Button::Start);
+                require(!playback->status().playing,"Start in an audition view stops an active song first");
+                auditionSilent();tap(Button::Start);
+                require(!playback->status().playing&&auditionAudible(pullAudition(*playback,3000)),
+                        "A fresh Start after stopping transport begins the current audition");
+                if(auditionView==2){tap(Button::B);require(mode==Mode::Normal,"B closes the envelope audition context");}
+                else changePage(Page::Pattern);
+                auditionSilent();
                 require(io::encodeXm(doc)==beforeView&&undoStack.size()==viewUndo,
-                        "normal preview release changes no document data or undo history");
-                if(auditionView==2)tap(Button::B);
+                        "Start audition, A release and context cancellation leave document and history unchanged");
             }
+
+            for(Page auditionPage:{Page::Instrument,Page::Sample}) {
+                changePage(auditionPage);instrumentField=sampleField=0;selectionStart=selectionEnd=0;pcmSelecting=false;
+                tap(Button::Start);require(auditionAudible(pullAudition(*playback,1000)),"Main audition starts before the song shortcut");
+                buttonInput(Button::Select,true);tap(Button::Start);buttonInput(Button::Select,false);
+                require(mode==Mode::Normal&&playback->status().playing&&playback->status().order==0&&playback->status().row==0&&!playingPattern,
+                        "Select+Start from Instrument or Sample replaces audition with the whole song from its beginning");
+                tap(Button::Start);auditionSilent();
+            }
+
+            changePage(Page::Sample);sampleField=0;selectionStart=selectionEnd=0;pcmSelecting=false;
+            const auto originalAuditionSample=doc.instruments[0].samples[0];
+            auto& longerAuditionSample=doc.instruments[0].samples[0];
+            longerAuditionSample.pcm.resize(1024);
+            for(std::size_t n=0;n<longerAuditionSample.pcm.size();++n)
+                longerAuditionSample.pcm[n]=originalAuditionSample.pcm[n%originalAuditionSample.pcm.size()];
+            longerAuditionSample.loopType=0;longerAuditionSample.loopLength=1024;playback->load(doc);
+            tap(Button::Start);
+            require(auditionAudible(pullAudition(*playback,256)),"Start begins a one-shot sample without forcing a loop");
+            pullAudition(*playback,6000);auditionSilent();
+            require(!playback->samplePreviewStatus().active,"One-shot sample preview reaches its natural end");
+            tap(Button::Start);
+            require(auditionAudible(pullAudition(*playback,256)),"One Start retriggers a naturally finished one-shot instead of only clearing stale toggle state");
+            tap(Button::Start);auditionSilent();
+            doc.instruments[0].samples[0].loopType=1;playback->load(doc);
+            selectionStart=128;selectionEnd=896;tap(Button::Start);pullAudition(*playback,128);
+            const auto selectedAudition=playback->samplePreviewStatus();
+            require(selectedAudition.active&&selectedAudition.instrument==1&&selectedAudition.sample==0&&
+                    selectedAudition.frame>=128&&selectedAudition.frame<896,
+                    "Start in Sample auditions the selected PCM range without a separate Play button");
+            tap(Button::Start);auditionSilent();selectionStart=selectionEnd=0;
+            tap(Button::Start);pullAudition(*playback,3000);
+            const auto beforeVolumeUndo=undoStack.size();const int previousVolume=currentSample()->volume;
+            chord({Button::Left});
+            require(currentSample()->volume==previousVolume-1&&undoStack.size()==beforeVolumeUndo+1&&
+                    playback->samplePreviewStatus().active&&auditionAudible(pullAudition(*playback,1000)),
+                    "Committing a sample volume edit retriggers the updated Start audition and keeps listening after A release");
+            tap(Button::Start);auditionSilent();
+            tap(Button::Start);require(auditionAudible(pullAudition(*playback,1000)),"Sample audition is active before focus loss");
+            SDL_Event auditionFocusLost{};auditionFocusLost.type=SDL_WINDOWEVENT;auditionFocusLost.window.event=SDL_WINDOWEVENT_FOCUS_LOST;
+            event(auditionFocusLost);auditionSilent();
+            doc.instruments[0].samples[0]=originalAuditionSample;playback->load(doc);
 
             for(Page target:{Page::Pattern,Page::Song}) {
                 changePage(target);clearSelection();tap(Button::Select);

@@ -44,6 +44,13 @@ struct PlaybackMonitor {
     std::array<ChannelMonitor, 32> channels{};
 };
 
+struct SamplePreviewStatus {
+    bool active = false;
+    int instrument = 0; // One-based instrument, or 0 for an unsaved draft.
+    int sample = -1;    // Zero-based sample slot, or -1 for an unsaved draft.
+    std::size_t frame = 0;
+};
+
 struct OutputMeter {
     // Final delivered stereo PCM peaks: abs(sample) / 32768, in 0..1.
     std::array<float, 2> peak{};
@@ -112,6 +119,14 @@ public:
     // tuning, volume and panning match the committed sample preview path.
     void previewSample(const Sample& sample, int noteXm = 49);
     void stopPreview();
+    // Active raw/instrument voices, or a row preview awaiting its next tick.
+    // Song transport is separate. Finished one-shots return false; looping
+    // voices remain active until stopped even when their volume is zero.
+    bool previewPlaying() const;
+    // Raw sample audition only; song and instrument voices are not included.
+    // Frame is absolute in the original PCM, including selected-range previews.
+    // This mixer snapshot can lead audible output by the audio buffer latency.
+    SamplePreviewStatus samplePreviewStatus() const;
     // Solo replaces the current mask with all channels except this one muted.
     // -1 clears every mute. The UI toggles an already-selected Solo with -1.
     void setSolo(int channel = -1);

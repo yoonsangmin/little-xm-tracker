@@ -73,11 +73,12 @@ The app uses KNULLI's device-specific SDL2. Do not replace it with a separate SD
 | B / Select+A | Copy the selection / paste |
 | B while playing in PATTERN, without a selection | Resume following playback |
 | B+D-Pad | Navigate pages, instruments and samples quickly |
-| Start | Start playback for the current screen / stop playback |
+| Start | SONG/PATTERN: play/stop; INSTRUMENT/SAMPLE and Envelope/DRAW/CHOP: audition/stop |
 | Select+Start | Play the song from Order 00 / stop playback |
 | Hold B, tap Select / Start | Mute / Solo the current channel |
 
 For button combinations, **press and hold the first button before pressing the second**. B cancels or goes back in dialogs.
+In SAMPLE, directions always move focus; edit LOOP/SELECTION START and END with A+D-Pad. PROCESS applies tools to the selection, or the whole sample when no range is selected.
 The [manual](docs/manual.html) covers each screen and links to effect references.
 Edit `gamecontrollerdb.txt` beside the executable to change SDL2 controller mappings. There is no mapping menu in the app.
 
