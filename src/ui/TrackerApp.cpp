@@ -1406,7 +1406,7 @@ struct TrackerApp::Impl {
             rows.push_back("B+LEFT/RIGHT          SAMPLE SLOT");
             rows.push_back("A ON NAME / LOAD      RENAME / IMPORT XI");
             rows.push_back("A ON ENVELOPE         OPEN ENVELOPE EDITOR");
-            rows.push_back("A ON KEY MAP/SETTINGS SWITCH INSTRUMENT VIEW");
+            if(!instrumentMapView)rows.push_back("A ON KEY MAP          EDIT NOTE-TO-SAMPLE ASSIGNMENTS");
             rows.push_back("SAMPLE LIST: A OPEN / A+B DELETE SLOT");
         } else {
             rows[7]="START                 LISTEN TO SAMPLE / SELECTION; STOP";

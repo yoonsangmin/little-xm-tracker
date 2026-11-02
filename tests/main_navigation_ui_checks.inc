@@ -28,15 +28,24 @@
             tap(Button::Left);require(sampleField==4,"Sample loop type clamps at the left edge of the bottom row");
             tap(Button::Up);tap(Button::Down);require(sampleField==4,"Sample remembers the bottom row's loop type focus");
 
-            page=Page::Instrument;instrumentMapView=false;instrumentField=11;
+            page=Page::Instrument;instrumentMapView=false;instrumentField=11;instrumentMappingFocus=2;
             tap(Button::Up);require(instrumentField==7,"Both Instrument envelope panels return up to Vibrato Sweep");
             tap(Button::Down);require(instrumentField==11,"Instrument restores the Panning Envelope panel");
             tap(Button::Down);require(instrumentField==11,"Instrument envelope row does not wrap at its bottom");
             instrumentField=9;tap(Button::Down);require(instrumentField==0,"Load XI goes down to the instrument fields");
             tap(Button::Up);require(instrumentField==9,"Instrument top row restores Load XI rather than Name");
             tap(Button::Up);require(instrumentField==9,"Instrument top row does not wrap upward");
+            tap(Button::Right);require(instrumentField==9,"LOAD is the right edge of the Instrument header");
+            tap(Button::Down);tap(Button::Down);tap(Button::Down);tap(Button::Right);
+            require(instrumentField==12,"The contextual KEY MAP button follows MAPPED SAMPLE horizontally");
+            tap(Button::Down);require(instrumentField==3,"KEY MAP goes straight down to FADEOUT");
+            tap(Button::Up);require(instrumentField==12,"Returning from FADEOUT restores KEY MAP");
+            tap(Button::Up);require(instrumentField==1,"KEY MAP goes straight up to MAP NOTE");
+            tap(Button::Down);require(instrumentField==12,"Returning from MAP NOTE restores KEY MAP");
+            tap(Button::Left);tap(Button::Down);tap(Button::Up);
+            require(instrumentField==2,"The mapping row remembers its value field independently of the top row");
             instrumentMapView=true;instrumentField=14;keymapNote=1;
-            tap(Button::Right);require(instrumentField==14,"Key-map right input cannot jump vertically to Settings");
+            tap(Button::Right);require(instrumentField==14,"Key-map right input cannot leave its note row");
             tap(Button::Up);require(instrumentField==9,"Key map restores the last top-row action");
             instrumentMapView=false;
 
@@ -73,5 +82,5 @@
             mode=Mode::Normal;page=Page::Pattern;held.fill(false);menuParents.clear();
             instrumentField=sampleField=0;songField=0;
             songRowFocus={{6,-1,-1,4,-1}};sampleRowFocus.fill(-1);
-            instrumentTopFocus=8;instrumentEnvelopeFocus=10;
+            instrumentTopFocus=8;instrumentEnvelopeFocus=10;instrumentMappingFocus=2;
         }

@@ -28,9 +28,9 @@
             keymapNote=1;optionChord(Button::Up);
             require(keymapNote==1&&instrumentField==14,"Key map paging clamps at the first note");
             tap(Button::B);
-            require(!instrumentMapView&&instrumentField==0&&keymapClipboard.empty()&&mode==Mode::Normal,
-                    "B with no key map selection returns to instrument settings without copying or opening Actions");
-            instrumentField=12;tap(Button::A);keymapNote=50;
+            require(!instrumentMapView&&instrumentField==12&&instrumentMappingFocus==12&&keymapClipboard.empty()&&mode==Mode::Normal,
+                    "B with no key map selection returns to the contextual KEY MAP button without copying or opening Actions");
+            tap(Button::A);keymapNote=50;
             require(instrumentMapView&&io::encodeXm(doc)==keymapDocument&&!dirty&&undoStack.empty(),
                     "Key map navigation and returning to settings leave XM and history untouched");
 
@@ -159,7 +159,7 @@
 
             playback->stop();playback->stopPreview();held.fill(false);clearSelection();keymapClipboard.clear();
             instrument=1;sample=0;keymapNote=49;instrumentMapView=false;instrumentField=0;
-            instrumentTopFocus=8;instrumentEnvelopeFocus=10;page=Page::Pattern;mode=Mode::Normal;
+            instrumentTopFocus=8;instrumentEnvelopeFocus=10;instrumentMappingFocus=2;page=Page::Pattern;mode=Mode::Normal;
             aUsed=bUsed=true;selectPending=selectUsed=false;cutChordUsed=modalBackHeld=channelModifier=false;channelChord=0;
             undoStack.clear();redoStack.clear();undoBytes=0;dirty=false;noticeUntil=0;
             normalize();playback->load(doc);

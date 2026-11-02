@@ -26,8 +26,8 @@
             tap(Button::A);
             require(page==Page::Sample&&sample==1&&io::encodeXm(doc)==originalSlots,
                     "A on the sample list opens SAMPLE without changing PCM");
-            changePage(Page::Instrument);instrumentField=12;tap(Button::A);
-            require(!instrumentMapView&&instrumentField==0,"SETTINGS returns from the note table");
+            changePage(Page::Instrument);tap(Button::B);
+            require(!instrumentMapView&&instrumentField==12,"B returns from the note table to the KEY MAP entry button");
             menu("COPY INSTRUMENT");
             require(instrumentClipboard&&instrumentClipboard->noteToSample==doc.instruments[0].noteToSample&&
                     instrumentClipboard->samples[1].name=="SECOND SAMPLE","Instrument copy still includes every mapping and sample");

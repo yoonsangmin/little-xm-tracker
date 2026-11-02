@@ -1,6 +1,6 @@
 // Instrument settings and key map share the same owned sample slots.
     bool instrumentMapView=false;
-    int instrumentTopFocus=8,instrumentEnvelopeFocus=10;
+    int instrumentTopFocus=8,instrumentEnvelopeFocus=10,instrumentMappingFocus=2;
     bool keymapSelected=false;
     int keymapSelectStage=0,keymapAnchor=49,keymapSelectionOwner=0;
     std::vector<std::uint8_t> keymapClipboard;
@@ -52,8 +52,8 @@
     }
     void toggleInstrumentMap() {
         finishGesture();clearSelection();stopHeldAudition(true);playback->stopPreview();
-        instrumentTopFocus=12;
-        instrumentMapView=!instrumentMapView;instrumentField=instrumentMapView?14:0;
+        instrumentMappingFocus=12;
+        instrumentMapView=!instrumentMapView;instrumentField=instrumentMapView?14:12;
     }
     bool instrumentPanelDirection(Button b,bool editing) {
         const bool vertical=b==Button::Up||b==Button::Down;
@@ -74,7 +74,8 @@
             }
             return false;
         }
-        if(instrumentField==8||instrumentField==9||instrumentField==12)instrumentTopFocus=instrumentField;
+        if(instrumentField==8||instrumentField==9)instrumentTopFocus=instrumentField;
+        if(instrumentField==2||instrumentField==12)instrumentMappingFocus=instrumentField;
         if(instrumentField==10||instrumentField==11)instrumentEnvelopeFocus=instrumentField;
         if(instrumentField==13) {
             if(b==Button::Up&&sample==0)instrumentField=8;
@@ -85,19 +86,21 @@
             if(b==Button::Down)keymapNote=std::min(96,keymapNote+1);
             if(b==Button::Left&&!hasKeymapSelection())instrumentField=13;
         } else if(instrumentField==12) {
-            if(b==Button::Left)instrumentField=9;
-            if(b==Button::Down)instrumentField=instrumentMapView?14:0;
+            if(b==Button::Left)instrumentField=2;
+            if(b==Button::Up)instrumentField=1;
+            if(b==Button::Down)instrumentField=3;
         } else if(instrumentField==8||instrumentField==9) {
             if(b==Button::Left)instrumentField=8;
-            if(b==Button::Right)instrumentField=instrumentField==8?9:12;
+            if(b==Button::Right)instrumentField=9;
             if(b==Button::Down)instrumentField=instrumentField==8?13:instrumentMapView?14:0;
         } else {
-            if(b==Button::Up)instrumentField=instrumentField==0?instrumentTopFocus:instrumentField<8?instrumentField-1:7;
-            if(b==Button::Down)instrumentField=instrumentField<7?instrumentField+1:instrumentField==7?instrumentEnvelopeFocus:instrumentField;
+            if(b==Button::Up)instrumentField=instrumentField==0?instrumentTopFocus:instrumentField==3?instrumentMappingFocus:instrumentField<8?instrumentField-1:7;
+            if(b==Button::Down)instrumentField=instrumentField==1?instrumentMappingFocus:instrumentField<7?instrumentField+1:instrumentField==7?instrumentEnvelopeFocus:instrumentField;
             if(b==Button::Left)instrumentField=instrumentField==11?10:13;
-            if(b==Button::Right&&instrumentField==10)instrumentField=11;
+            if(b==Button::Right){if(instrumentField==2)instrumentField=12;else if(instrumentField==10)instrumentField=11;}
         }
-        if(instrumentField==8||instrumentField==9||instrumentField==12)instrumentTopFocus=instrumentField;
+        if(instrumentField==8||instrumentField==9)instrumentTopFocus=instrumentField;
+        if(instrumentField==2||instrumentField==12)instrumentMappingFocus=instrumentField;
         if(instrumentField==10||instrumentField==11)instrumentEnvelopeFocus=instrumentField;
         return true;
     }
@@ -110,12 +113,11 @@
     }
     void drawInstrument() {
         auto* i=currentInstrument();
-        rect(20,52,732,controlHeight,instrumentField==8?panel2:bg);
+        rect(20,52,858,controlHeight,instrumentField==8?panel2:bg);
         if(instrumentField==8)rect(20,52,focusBarWidth,controlHeight,amber);
         txt(34,52+controlTextY,"NAME",instrumentField==8?amber:muted);
-        txt(112,52+controlTextY,i?ui::fit(text::xmDisplayText(i->name),52):"EMPTY INSTRUMENT",instrumentField==8?amber:ink);
-        drawButton(760,52,118,"LOAD",instrumentField==9);
-        drawButton(886,52,118,instrumentMapView?"SETTINGS":"KEY MAP",instrumentField==12);
+        txt(112,52+controlTextY,i?ui::fit(text::xmDisplayText(i->name),62):"EMPTY INSTRUMENT",instrumentField==8?amber:ink);
+        drawButton(886,52,118,"LOAD",instrumentField==9);
         rect(20,104,326,616,panel);txt(32,116,"SLOT  NAME",muted);
         for(int n=0;n<16;++n) {
             const int y=152+n*32;const bool selected=n==sample;
@@ -146,7 +148,8 @@
         }
         const std::array<std::string,8> labels={"SAMPLE SLOT","MAP NOTE","MAPPED SAMPLE","FADEOUT","VIBRATO DEPTH","VIBRATO RATE","VIBRATO TYPE","VIBRATO SWEEP"};
         const std::array<std::string,8> values={hex(sample),noteName(keymapNote),hex(i->noteToSample[keymapNote-1]),hex(i->fadeout,4),hex(i->vibratoDepth),hex(i->vibratoRate),hex(i->vibratoType),hex(i->vibratoSweep)};
-        for(int n=0;n<8;++n)labelValue(362,104+n*42,labels[n],values[n],instrumentField==n,642);
+        for(int n=0;n<8;++n)labelValue(362,104+n*42,labels[n],values[n],instrumentField==n,n==2?516:642);
+        drawButton(886,188,118,"KEY MAP",instrumentField==12);
         const auto preview=playback->instrumentPreviewStatus();
         const bool previewMatches=preview.active&&preview.instrument==instrument;
         txt(372,460,"VOLUME ENVELOPE",instrumentField==10?amber:muted);

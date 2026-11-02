@@ -362,12 +362,12 @@
                 "Vibrato type - Automatic vibrato waveform", "Vibrato sweep - Time to reach full depth",
                 "Name - Rename this instrument", "Load XI - Replace this instrument",
                 "Volume envelope - Edit points", "Panning envelope - Edit points",
-                "Key map / Settings - Switch instrument view", "Sample - A opens editor / A+B deletes this slot",
+                "Key map - Edit note-to-sample assignments", "Sample - A opens editor / A+B deletes this slot",
                 "Key map - A+DPAD changes this note's sample"};
             context=meanings[std::clamp(instrumentField,0,14)];
             if(instrumentField==14)context=hasKeymapSelection()?
                 "Key map - A+DPAD edit range / B copy / A+B cut":
-                noteName(keymapNote)+" - A+DPAD maps sample / B+UP/DOWN page / B settings";
+                noteName(keymapNote)+" - A+DPAD maps sample / B+UP/DOWN page / B back";
         } else {
             static const char* meanings[]={
                 "Volume - Default sample volume, 00 to 40", "Panning - Default position, 00 left to FF right",
