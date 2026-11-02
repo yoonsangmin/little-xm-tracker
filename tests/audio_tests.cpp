@@ -147,6 +147,168 @@ void previewActivity() {
             "Structural updates end previews without claiming a song restart");
 }
 
+void instrumentEnvelopeCompletion() {
+    using namespace brick;
+    for (const int rate : {44100, 48000}) {
+        auto document = fixture();
+        auto& env = document.instruments[0].volumeEnvelope;
+        env.flags = 1; env.count = 2;
+        env.points[0] = {0, 64}; env.points[1] = {4, 0};
+        Playback player({rate, Interpolation::Linear});
+        player.load(document);player.previewNote(1, 49);
+        require(audible(read(player, rate / 25)) && player.previewPlaying(),
+                "An instrument envelope must remain active while its decay is audible");
+        read(player, rate / 4);
+        require(!player.previewPlaying() && !audible(read(player, rate / 20)),
+                "A looped sample preview finishes automatically after its volume envelope ends at zero");
+        player.previewNote(1, 49);
+        require(player.previewPlaying() && audible(read(player, rate / 25)),
+                "A naturally completed envelope can restart on the next Start without an extra stop");
+
+        // An initial rest and a long middle rest must both survive until the
+        // later attack. A silence timeout would cut this envelope too early.
+        env.count = 7;
+        env.points[0] = {0, 0}; env.points[1] = {4, 0}; env.points[2] = {6, 64};
+        env.points[3] = {8, 0}; env.points[4] = {20, 0}; env.points[5] = {24, 64};
+        env.points[6] = {28, 0};
+        player.load(document);player.previewNote(1, 49);
+        require(!audible(read(player, rate / 20)) && player.previewPlaying(),
+                "A silent attack does not end an instrument audition");
+        require(audible(read(player, rate / 5)), "The first attack still sounds after its silent start");
+        require(!audible(read(player, rate / 10)) && player.previewPlaying(),
+                "A middle-envelope rest remains active");
+        require(audible(read(player, rate * 3 / 20)) && player.previewPlaying(),
+                "The envelope can become audible again after a long rest");
+        read(player, rate / 5);
+        require(!player.previewPlaying(), "The later final zero still completes the instrument audition");
+
+        env.flags = 5; env.count = 2; env.loopStart = 0; env.loopEnd = 1;
+        env.points[0] = {0, 64}; env.points[1] = {4, 0};
+        player.load(document);player.previewNote(1, 49);read(player, rate);
+        require(player.previewPlaying() && audible(read(player, rate / 5)),
+                "An envelope loop ending at zero continues through later audible passes");
+
+        env.flags = 3; env.count = 4; env.sustain = 1;
+        env.points[0] = {0, 64}; env.points[1] = {2, 0};
+        env.points[2] = {4, 64}; env.points[3] = {8, 0};
+        player.load(document);player.previewNote(1, 49);read(player, rate / 2);
+        require(player.previewPlaying() && !audible(read(player, rate / 10)),
+                "A silent sustain holds its note rather than being mistaken for envelope completion");
+
+        env.flags = 0;
+        player.load(document);player.previewNote(1, 49);read(player, rate / 2);
+        require(player.previewPlaying() && audible(read(player, rate / 10)),
+                "A disabled volume envelope cannot end an instrument audition");
+
+        env.flags = 1; env.count = 2;
+        env.points[0] = {0, 64}; env.points[1] = {4, 0};
+        document.instruments.push_back(document.instruments[0]);
+        document.instruments[1].volumeEnvelope.flags = 0;
+        document.patterns[0].at(0, 1, document.channels) = {49, 2, 0x50, 0, 0};
+        player.load(document);player.playSong();player.previewNote(1, 49);read(player, rate / 4);
+        require(!player.previewPlaying() && player.status().playing && audible(read(player, rate / 10)),
+                "Completing an instrument envelope leaves independent song playback sounding");
+
+        document.patterns[0].at(0, 0, document.channels) = {49, 1, 0x50, 0, 0};
+        player.load(document);player.previewRow(0, 0);read(player, rate / 4);
+        require(player.previewPlaying() && audible(read(player, rate / 10)),
+                "A row audition retains other sustained voices after one instrument decays");
+
+        auto raw = document.instruments[0].samples[0];raw.volume = 0;
+        player.load(document);player.previewSample(raw);read(player, rate / 4);
+        require(player.previewPlaying() && !audible(read(player, rate / 10)),
+                "Silent raw waveform previews stay active for live Draw edits");
+    }
+}
+
+void instrumentPreviewPlayheads() {
+    using namespace brick;
+    const auto inactive = [](const InstrumentPreviewStatus& value) {
+        return !value.active && !value.instrument && value.volumeTick == -1 && value.panningTick == -1;
+    };
+    const auto same = [](const InstrumentPreviewStatus& a, const InstrumentPreviewStatus& b) {
+        return a.active == b.active && a.instrument == b.instrument &&
+            a.volumeTick == b.volumeTick && a.panningTick == b.panningTick;
+    };
+    for (const int rate : {44100, 48000}) {
+        auto document = fixture();
+        document.instruments.reserve(2);
+        auto& volume = document.instruments[0].volumeEnvelope;
+        volume.flags = 3; volume.count = 3; volume.sustain = 1;
+        volume.points[0] = {0, 64}; volume.points[1] = {3, 32}; volume.points[2] = {9, 48};
+        auto& pan = document.instruments[0].panningEnvelope;
+        pan.flags = 5; pan.count = 3; pan.loopStart = 1; pan.loopEnd = 2;
+        pan.points[0] = {0, 32}; pan.points[1] = {2, 0}; pan.points[2] = {6, 64};
+        document.instruments.push_back(document.instruments[0]);
+        document.instruments[1].volumeEnvelope.flags = 0;
+        document.instruments[1].panningEnvelope.flags = 0;
+        document.patterns[0].at(0, 0, document.channels) = {49, 1, 0x50, 0, 0};
+        Playback player({rate, Interpolation::Linear}), reference({rate, Interpolation::Linear});
+        require(inactive(player.instrumentPreviewStatus()), "Unloaded instrument playheads are inactive");
+        player.load(document); reference.load(document);
+        require(inactive(player.instrumentPreviewStatus()), "Loaded idle voices have no instrument playhead");
+        player.previewNote(1,49); reference.previewNote(1,49);
+        auto state = player.instrumentPreviewStatus();
+        require(state.active && state.instrument == 1 && state.volumeTick == 0 && state.panningTick == 0,
+                "Fresh instrument playheads start at actual trigger tick zero");
+        bool progressed = false, wrapped = false;
+        int previousPan = 0;
+        for (int packet = 0; packet < 160; ++packet) {
+            const auto before = player.instrumentPreviewStatus();
+            require(same(before, player.instrumentPreviewStatus()), "Reading envelope state does not advance audio clocks");
+            require(read(player, std::size_t(rate / 250)) == read(reference, std::size_t(rate / 250)),
+                    "Observing envelope playheads leaves exact PCM and timing unchanged");
+            state = player.instrumentPreviewStatus();
+            require(state.active && state.instrument == 1 && state.volumeTick >= 0 && state.volumeTick <= 3,
+                    "Volume playhead follows the real sustain point without advancing beyond it");
+            require(state.panningTick >= 0 && state.panningTick < 6,
+                    "Panning playhead follows the actual loop without an early end-point jump");
+            progressed |= state.volumeTick > 0;
+            wrapped |= state.panningTick < previousPan;
+            previousPan = state.panningTick;
+        }
+        require(progressed && wrapped && state.volumeTick == 3,
+                "Independent volume sustain and panning loop clocks progress at both output rates");
+        player.previewNote(1,61);
+        state = player.instrumentPreviewStatus();
+        require(state.active && state.volumeTick == 0 && state.panningTick == 0,
+                "Retriggering a note resets both envelope positions immediately");
+        player.previewNote(2,49); state = player.instrumentPreviewStatus();
+        require(state.active && state.instrument == 2 && state.volumeTick == -1 && state.panningTick == -1,
+                "Switching preview instruments changes identity and hides disabled envelopes");
+        player.stopPreview(); require(inactive(player.instrumentPreviewStatus()), "Stop preview clears the envelope playhead immediately");
+        player.previewNote(1,49); player.stop();
+        require(inactive(player.instrumentPreviewStatus()), "Global stop clears instrument envelope playheads");
+        player.previewNote(1,49); player.previewSample(1,0);
+        require(inactive(player.instrumentPreviewStatus()), "Raw sample preview cannot inherit an instrument envelope playhead");
+        player.stopPreview(); player.previewNote(1,49); player.previewSample(document.instruments[0].samples[0]);
+        require(inactive(player.instrumentPreviewStatus()), "Unsaved raw drafts do not expose an instrument envelope playhead");
+        player.stopPreview(); player.previewNote(1,49); player.previewRow(0,0); read(player,rate/5);
+        require(inactive(player.instrumentPreviewStatus()), "Held row voices never masquerade as isolated instrument previews");
+        player.stopPreview(); player.playSong(); read(player,rate/10);
+        require(inactive(player.instrumentPreviewStatus()), "Song envelope voices do not expose isolated preview positions");
+        player.previewNote(1,49); read(player,rate/10);
+        require(player.instrumentPreviewStatus().active && player.status().playing,
+                "An explicitly auditioned instrument keeps its own playhead during independent song playback");
+        player.stop(); player.previewNote(1,49); player.load(document);
+        require(inactive(player.instrumentPreviewStatus()), "Document reload removes stale instrument identity and clocks");
+
+        // Endpoint handling is driven by the envelope state, not a timeout.
+        volume.flags = 1; volume.count = 2; volume.points[1] = {4,48};
+        pan.flags = 1; pan.count = 2; pan.points[1] = {7,16};
+        player.load(document); player.previewNote(1,49); read(player,rate/2);
+        state = player.instrumentPreviewStatus();
+        require(state.active && state.volumeTick == 4 && state.panningTick == 7,
+                "Completed nonzero envelopes hold their own final tick independently");
+        volume.points[1].y = 0;
+        player.load(document); player.previewNote(1,49); read(player,rate/2);
+        require(inactive(player.instrumentPreviewStatus()), "Naturally completed zero-volume envelopes hide their playheads");
+        volume.flags = pan.flags = 0; document.instruments[0].noteToSample.fill(1);
+        player.load(document); player.previewNote(1,49); read(player,rate/2);
+        require(inactive(player.instrumentPreviewStatus()), "A completed one-shot sample hides even disabled-envelope preview identity");
+    }
+}
+
 void samplePreviewPlayhead() {
     using namespace brick;
     auto document = fixture();
@@ -1254,6 +1416,8 @@ int main() {
     try {
         playbackAndAudition();
         previewActivity();
+        instrumentEnvelopeCompletion();
+        instrumentPreviewPlayheads();
         samplePreviewPlayhead();
         draftSampleAudition();
         outputMeter();

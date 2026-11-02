@@ -68,12 +68,12 @@
 
             resetUndoLabels();changePage(Page::Song);doc.patterns.push_back(doc.patterns[0]);playback->load(doc);
             const auto beforePatternCleanup=io::encodeXm(doc);
-            cleanupSong(edit::CleanupScope::Patterns);tap(Button::A);
-            changePage(Page::Sample);expectUndoLabel("CLEAN UP PATTERNS",beforePatternCleanup);
+            menu("CLEAN UP PATTERNS");tap(Button::A);
+            changePage(Page::Sample);expectUndoLabel("CLEAN UP SONG",beforePatternCleanup);
             resetUndoLabels();changePage(Page::Song);doc.instruments.push_back(doc.instruments[0]);playback->load(doc);
             const auto beforeInstrumentCleanup=io::encodeXm(doc);
-            cleanupSong(edit::CleanupScope::Instruments);tap(Button::A);
-            changePage(Page::Pattern);expectUndoLabel("CLEAN UP INSTRUMENTS",beforeInstrumentCleanup);
+            menu("CLEAN UP INSTRUMENTS");tap(Button::A);
+            changePage(Page::Pattern);expectUndoLabel("CLEAN UP SONG",beforeInstrumentCleanup);
 
             resetUndoLabels();changePage(Page::Sample);const auto beforeImport=io::encodeXm(doc);
             auto labelImportSample=*currentSample();labelImportSample.pcm={-16384,0,16384,0};

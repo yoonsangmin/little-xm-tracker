@@ -51,6 +51,12 @@ struct SamplePreviewStatus {
     std::size_t frame = 0;
 };
 
+struct InstrumentPreviewStatus {
+    bool active = false;
+    int instrument = 0; // One-based instrument matching the isolated note voice.
+    int volumeTick = -1, panningTick = -1; // -1 means disabled/unavailable.
+};
+
 struct OutputMeter {
     // Final delivered stereo PCM peaks: abs(sample) / 32768, in 0..1.
     std::array<float, 2> peak{};
@@ -121,12 +127,20 @@ public:
     void stopPreview();
     // Active raw/instrument voices, or a row preview awaiting its next tick.
     // Song transport is separate. Finished one-shots return false; looping
-    // voices remain active until stopped even when their volume is zero.
+    // raw voices remain active until stopped even when their volume is zero.
+    // A fresh instrument audition also ends after an enabled non-looping,
+    // non-sustaining volume envelope reaches its final zero. Intermediate
+    // silence, row previews and song transport do not trigger this completion.
     bool previewPlaying() const;
     // Raw sample audition only; song and instrument voices are not included.
     // Frame is absolute in the original PCM, including selected-range previews.
     // This mixer snapshot can lead audible output by the audio buffer latency.
     SamplePreviewStatus samplePreviewStatus() const;
+    // Isolated instrument-note preview only; raw/row/song playback is excluded.
+    // Positions come from the engine envelope state applied to the current
+    // mixer tick, including sustain and loops, not elapsed-time estimates.
+    // Like samplePreviewStatus(), this can lead output by buffer latency.
+    InstrumentPreviewStatus instrumentPreviewStatus() const;
     // Solo replaces the current mask with all channels except this one muted.
     // -1 clears every mute. The UI toggles an already-selected Solo with -1.
     void setSolo(int channel = -1);

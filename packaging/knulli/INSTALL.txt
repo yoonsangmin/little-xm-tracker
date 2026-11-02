@@ -74,7 +74,8 @@ For selected pattern notes, A+Left/Right transposes by a semitone; A+Up/Down by 
 In Sample, directions always move focus. Select+B focuses selection END; edit
 START/END with A+Left/Right by one frame or A+Up/Down by 1% of sample length.
 END excludes that frame. Moving one endpoint keeps the other fixed.
-B copies, Select cancels and A+B cuts the selection.
+B copies the selected PCM; Select cancels. A+B resets the focused numeric field.
+Use PROCESS > CUT PCM / PASTE PCM for audio editing. Select+A is unused in SAMPLE.
 Press A on PROCESS to open tools while keeping the range; no selection means
 the whole sample. PROCESS > LOOP FROM SELECTION makes a Forward loop.
 
@@ -86,7 +87,8 @@ A release keeps it playing; a finished one-shot restarts with one Start press.
 If the song is playing, the first Start stops it; press again to audition.
 Select+Start preserves a selection without looping it; follow stays paused while it is active.
 The top bar shows the current BPM and final L/R output meters.
-A+B cuts; Select+A pastes. B+D-Pad navigates patterns, channel pages, instruments and samples.
+A+B cuts and Select+A pastes in PATTERN, SONG, KEY MAP and envelope editing.
+B+D-Pad navigates patterns, channel pages, instruments and samples.
 In PATTERN, B+Up/Down moves through 16/32-row pages, then to the previous/next order at the page boundary.
 It keeps the relative row within the page, entering the previous order on its last page and the next on its first.
 Left/Right and B+Left/Right in PATTERN keep follow active while browsing columns/channels.

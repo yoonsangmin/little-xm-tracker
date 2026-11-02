@@ -40,17 +40,17 @@
                     "changing editing resolution never resizes or changes the draft PCM");
             tap(Button::Down);require(waveDrawFocus==2,"down enters the first DRAW button initially");
             tap(Button::Right);tap(Button::Right);tap(Button::Right);tap(Button::Down);
-            require(waveDrawFocus==4,"APPLY clamps at the right and bottom edges instead of wrapping");
-            tap(Button::Up);require(waveDrawFocus==1,"APPLY up goes straight to EDIT POINTS, not NEW WAVE");
-            tap(Button::Down);require(waveDrawFocus==4,"returning to the DRAW button row remembers APPLY");
+            require(waveDrawFocus==3,"APPLY clamps at the right and bottom edges instead of wrapping");
+            tap(Button::Up);require(waveDrawFocus==1,"APPLY up goes straight to EDIT POINTS");
+            tap(Button::Down);require(waveDrawFocus==3,"returning to the DRAW button row remembers APPLY");
             tap(Button::Left);tap(Button::Left);tap(Button::Left);tap(Button::Up);tap(Button::Down);
-            require(waveDrawFocus==2,"NEW WAVE is also remembered and left never leaves its button row");
+            require(waveDrawFocus==2,"CLEAR ALL is also remembered and left never leaves its button row");
             tap(Button::B);
 
             openWaveDraw();buttonInput(Button::A,true);tap(Button::B);buttonInput(Button::A,false);chord({Button::Right});
             require(waveDrawPointCount()==16&&drawingSample->pcm[1]!=currentSample()->pcm[1],
                     "coarse drawing interpolates neighbouring PCM instead of requiring per-frame edits");
-            const auto beforeApplyCount=undoStack.size();waveFocus(4);tap(Button::A);
+            const auto beforeApplyCount=undoStack.size();waveFocus(3);tap(Button::A);
             require(!drawingSample&&mode==Mode::Normal&&currentSample()->pcm[0]==256&&undoStack.size()==beforeApplyCount+1,
                     "DRAW APPLY commits exactly one edit and consumes its A release");
             undo();require(io::encodeXm(doc)==beforeDraw,"one Undo restores the complete sample before drawing");
@@ -93,36 +93,45 @@
             tap(Button::Down);tap(Button::A);
             require(!wavePresetOpen&&drawingSample&&drawingSample->pcm.size()==64&&waveDrawFocus==0&&io::encodeXm(doc)==beforeEmptyWave,
                     "CREATE stages the selected length and returns to DRAW VALUE without editing the song");
-            waveFocus(3);tap(Button::A);
+            waveFocus(2);tap(Button::A);
             require(std::all_of(drawingSample->pcm.begin(),drawingSample->pcm.end(),[](std::int16_t value){return value==0;}),
                     "CLEAR ALL supplies an empty drawing canvas without a BLANK preset");
             waveFocus(0);chord({Button::Up});
             require(drawingSample->pcm[0]==4096&&drawingSample->pcm[1]>0&&drawingSample->pcm[4]==0,
                     "a control-point edit draws a slope after clearing the generated waveform");
-            waveFocus(4);tap(Button::A);
+            waveFocus(3);tap(Button::A);
             require(currentSample()&&!currentSample()->sixteenBit&&currentSample()->pcm.size()==64&&
                     currentSample()->loopType==1&&currentSample()->loopStart==0&&currentSample()->loopLength==64,
                     "new waves apply as eight-bit looping PCM with their chosen frame count");
 
-            // NEW WAVE cancellation preserves already drawn PCM and its cursor.
+            // The top-level creator replaces a full sample only after APPLY.
+            // Cancelling it preserves the existing sample, range and history.
             selectionStart=8;selectionEnd=24;
-            const auto beforeNewWave=io::encodeXm(doc);openWaveDraw();chord({Button::Up});tap(Button::Right);
-            waveFocus(1);chord({Button::Right});
-            const auto existingDraft=drawingSample->pcm;const int existingFrame=drawFrame;
-            const int existingResolution=waveDrawResolution;
-            waveFocus(2);tap(Button::A);
-            require(wavePresetOpen&&drawingSample->pcm==existingDraft,"opening NEW WAVE does not clear an existing drawing draft");
-            tap(Button::Down);tap(Button::A);chord({Button::Right});tap(Button::B);
-            require(!wavePresetOpen&&mode==Mode::WaveDraw&&drawingSample->pcm==existingDraft&&drawFrame==existingFrame&&
-                    waveDrawFirst==8&&waveDrawLast==24&&waveDrawResolution==existingResolution&&waveDrawFocus==2&&
-                    io::encodeXm(doc)==beforeNewWave,"B from NEW WAVE retains the existing draft, range, cursor and editing resolution");
-            tap(Button::B);require(io::encodeXm(doc)==beforeNewWave,"B from DRAW discards the retained draft without changing the song");
+            const auto beforeNewWave=io::encodeXm(doc);
+            const auto beforeNewUndo=undoStack.size(),beforeNewRedo=redoStack.size();
+            const auto beforeNewRevision=documentRevision,beforeNewRecovery=recoverySerial;
+            const bool beforeNewDirty=dirty;
+            openNewWave();
+            require(mode==Mode::WaveDraw&&wavePresetOpen&&!drawingSample&&io::encodeXm(doc)==beforeNewWave,
+                    "NEW WAVE opens its own candidate without opening or changing a DRAW draft");
+            waveCreateFocus(5);chord({Button::Right});tap(Button::B);
+            require(!wavePresetOpen&&!drawingSample&&mode==Mode::Normal&&selectionStart==8&&selectionEnd==24&&
+                    io::encodeXm(doc)==beforeNewWave&&undoStack.size()==beforeNewUndo&&redoStack.size()==beforeNewRedo&&
+                    documentRevision==beforeNewRevision&&recoverySerial==beforeNewRecovery&&dirty==beforeNewDirty,
+                    "B from NEW WAVE returns to SAMPLE and preserves PCM, selection, save state and edit history");
+
+            openWaveDraw();const auto beforeRangeDraw=drawingSample->pcm;chord({Button::Up});
+            require(waveDrawFirst==8&&waveDrawLast==24&&drawingSample->pcm!=beforeRangeDraw&&
+                    std::equal(beforeRangeDraw.begin(),beforeRangeDraw.begin()+8,drawingSample->pcm.begin())&&
+                    std::equal(beforeRangeDraw.begin()+24,beforeRangeDraw.end(),drawingSample->pcm.begin()+24),
+                    "DRAW still edits only the selected range and preserves PCM outside both endpoints");
+            tap(Button::B);require(io::encodeXm(doc)==beforeNewWave,"cancelling a range drawing keeps the source sample unchanged");
 
             // Clearing is a whole-draft operation, even while editing a partial range.
             openWaveDraw();tap(Button::Right);
             const auto clearDraft=*drawingSample;const int clearCursor=drawFrame;
-            const auto beforeClearUndo=undoStack.size();waveFocus(3);tap(Button::A);
-            require(waveDrawFocus==3&&drawFrame==clearCursor&&waveDrawFirst==8&&waveDrawLast==24&&
+            const auto beforeClearUndo=undoStack.size();waveFocus(2);tap(Button::A);
+            require(waveDrawFocus==2&&drawFrame==clearCursor&&waveDrawFirst==8&&waveDrawLast==24&&
                     drawingSample->pcm.size()==clearDraft.pcm.size()&&
                     std::all_of(drawingSample->pcm.begin(),drawingSample->pcm.end(),[](std::int16_t value){return value==0;}),
                     "CLEAR ALL zeros PCM outside and inside the selected range while retaining its cursor and frame count");
@@ -134,18 +143,23 @@
                     "CLEAR ALL retains sample metadata and creates no document change or Undo before APPLY");
             noticeUntil=0;draw();screenshot(home/"wave-draw-clear-native.bmp");SDL_RenderPresent(renderer);
             tap(Button::Up);require(waveDrawFocus==1,"CLEAR ALL up leaves the horizontal button row immediately");
-            tap(Button::Down);require(waveDrawFocus==3,"returning to the button row remembers CLEAR ALL");
+            tap(Button::Down);require(waveDrawFocus==2,"returning to the button row remembers CLEAR ALL");
             tap(Button::B);require(io::encodeXm(doc)==beforeNewWave,"canceling a cleared draft keeps every original frame");
-            openWaveDraw();waveFocus(3);tap(Button::A);waveFocus(4);tap(Button::A);
+            openWaveDraw();waveFocus(2);tap(Button::A);waveFocus(3);tap(Button::A);
             require(undoStack.size()==beforeClearUndo+1&&
                     std::all_of(currentSample()->pcm.begin(),currentSample()->pcm.end(),[](std::int16_t value){return value==0;}),
                     "applying CLEAR ALL commits exactly one undoable edit");
             undo();require(io::encodeXm(doc)==beforeNewWave,"one Undo restores all PCM and metadata after CLEAR ALL");
 
             // A new waveform replaces the full draft rather than filling an imported selection.
-            selectionStart=8;selectionEnd=24;openWaveDraw();waveFocus(2);tap(Button::A);tap(Button::Right);tap(Button::Right);
+            selectionStart=8;selectionEnd=24;openNewWave();tap(Button::Right);tap(Button::Right);
             require(waveDrawPreset==2,"PULSE replaces the former fixed-duty SQUARE preset");
-            tap(Button::A);chord({Button::Right});tap(Button::Right);
+            tap(Button::A);
+            require(waveNewFocus==5&&wavePresetDraftPcm.size()==32,
+                    "a fresh PULSE creator starts on its default thirty-two-frame setting");
+            chord({Button::Right});
+            require(wavePresetDraftPcm.size()==64,"A+Right explicitly sets PULSE to sixty-four frames before editing DUTY");
+            tap(Button::Right);
             require(waveNewFocus==6&&waveDutyIndex==2,"PULSE exposes DUTY beside FRAMES, initially at fifty percent");
             const auto halfPulse=wavePresetDraftPcm;tap(Button::A);tap(Button::Left);tap(Button::Right);
             require(wavePresetDraftPcm==halfPulse&&waveNewFocus==6,"DUTY changes only with A plus a direction");
@@ -157,12 +171,12 @@
             require(drawingSample->pcm.size()==64&&drawingSample->pcm[0]==16384&&drawingSample->pcm[8]==-16384&&
                     waveDrawFirst==0&&waveDrawLast==64&&io::encodeXm(doc)==beforeNewWave,
                     "CREATE replaces only the local draft with the selected pulse width, leaving the song untouched");
-            const auto pulseUndoCount=undoStack.size();waveFocus(4);tap(Button::A);
+            const auto pulseUndoCount=undoStack.size();waveFocus(3);tap(Button::A);
             require(undoStack.size()==pulseUndoCount+1&&currentSample()->loopLength==64,
                     "new waveform APPLY creates one undoable sample replacement");
             undo();require(io::encodeXm(doc)==beforeNewWave,"one Undo restores the complete previous sample and metadata");
 
-            selectionStart=selectionEnd=0;openWaveDraw();waveFocus(2);tap(Button::A);
+            selectionStart=selectionEnd=0;openNewWave();
             waveCreateFocus(4);
             require(wavePresetOpen&&waveDrawPreset==4,"NOISE occupies the final real preset tile");
             tap(Button::Right);require(waveNewFocus==4,"the right edge of the preset row does not wrap");
@@ -184,7 +198,7 @@
             waveCreateFocus(7);tap(Button::A);
             require(drawingSample&&drawingSample->pcm==shortNoise&&drawingSample->loopLength==127&&waveDrawResolution==4,
                     "SHORT CREATE uses the complete candidate and starts in individual-frame editing");
-            waveFocus(2);tap(Button::A);tap(Button::A);chord({Button::Right,Button::Right});
+            tap(Button::B);openNewWave();waveCreateFocus(4);tap(Button::A);chord({Button::Left});chord({Button::Right,Button::Right});
             require(waveNoiseType==1&&wavePresetDraftPcm==firstNoiseCandidate,
                     "LONG remains deterministic when returning from SHORT and clamps at the final type");
             noticeUntil=0;draw();screenshot(home/"new-wave-noise-native.bmp");SDL_RenderPresent(renderer);
@@ -192,7 +206,7 @@
             require(!wavePresetOpen&&drawingSample->pcm==appliedNoise&&drawingSample->loopLength==32767&&waveDrawResolution==4&&
                     io::encodeXm(doc)==beforeNewWave,"LONG CREATE preserves the full period in a FRAME draft without altering the document");
             noticeUntil=0;draw();screenshot(home/"wave-draw-noise-native.bmp");SDL_RenderPresent(renderer);
-            const auto beforeNoiseUndo=undoStack.size();waveFocus(4);tap(Button::A);
+            const auto beforeNoiseUndo=undoStack.size();waveFocus(3);tap(Button::A);
             require(undoStack.size()==beforeNoiseUndo+1&&currentSample()->pcm==appliedNoise,
                     "final APPLY commits Noise as one Undo operation");
             const auto noiseReopened=io::decodeXm(io::encodeXm(doc));

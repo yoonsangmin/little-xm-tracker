@@ -9,7 +9,9 @@
             const int count=int(themeFiles.size())+(themeSaving?1:0);
             if(b==Button::Up||b==Button::Down||b==Button::Left||b==Button::Right) {
                 const int step=b==Button::Left||b==Button::Right?13:1;
+                const int previous=themeFileIndex;
                 themeFileIndex=std::clamp(themeFileIndex+(b==Button::Down||b==Button::Right?step:-step),0,std::max(0,count-1));
+                if(themeFileIndex!=previous){rememberThemeFileSelection();refreshThemeFilePreview();}
                 if(held[std::size_t(Button::A)])aUsed=true;
             }
             return true;
@@ -56,13 +58,38 @@
         return true;
     }
 
+    std::array<SDL_Color,13> readThemeFilePalette(const std::filesystem::path& path) {
+        if(std::filesystem::file_size(path)>65536)throw std::runtime_error("THEME FILE IS TOO LARGE");
+        return colorPalette(io::decodeTheme(io::readFile(path)));
+    }
+
+    void rememberThemeFileSelection() {
+        (themeSaving?themeSaveIndex:themeLoadIndex)=themeFileIndex;
+        auto& path=themeSaving?themeSavePath:themeLoadPath;
+        const int index=themeFileIndex-(themeSaving?1:0);
+        if(index>=0&&index<int(themeFiles.size()))path=themeFiles[std::size_t(index)];
+        else if(themeSaving)path.clear(); // NEW THEME is a distinct save destination.
+    }
+
+    void refreshThemeFilePreview() {
+        themeFilePreview.reset();themeFilePreviewError.clear();
+        if(themeSaving||themeFiles.empty())return;
+        try {themeFilePreview=readThemeFilePalette(themeFiles[std::size_t(themeFileIndex)]);}
+        catch(const std::exception&) {themeFilePreviewError="CANNOT PREVIEW THIS FILE";}
+    }
+
     void openThemeFiles(bool savingTheme) {
         std::filesystem::create_directories(themeDirectory);
         std::vector<std::filesystem::path> found;
         for(const auto& entry:std::filesystem::directory_iterator(themeDirectory))
             if(!entry.is_symlink()&&entry.is_regular_file()&&lower(entry.path().extension().u8string())==".theme")found.push_back(entry.path());
         std::sort(found.begin(),found.end(),[](const auto& a,const auto& b){return a.filename().u8string()<b.filename().u8string();});
-        themeFiles=std::move(found);themeFileIndex=0;themeSaving=savingTheme;mode=Mode::ThemeFiles;
+        themeFiles=std::move(found);themeSaving=savingTheme;
+        const int count=int(themeFiles.size())+(themeSaving?1:0);
+        themeFileIndex=std::clamp(themeSaving?themeSaveIndex:themeLoadIndex,0,std::max(0,count-1));
+        const auto remembered=std::find(themeFiles.begin(),themeFiles.end(),themeSaving?themeSavePath:themeLoadPath);
+        if(remembered!=themeFiles.end())themeFileIndex=int(std::distance(themeFiles.begin(),remembered))+(themeSaving?1:0);
+        rememberThemeFileSelection();refreshThemeFilePreview();mode=Mode::ThemeFiles;
     }
 
     void saveThemeFile(const std::filesystem::path& path) {
@@ -73,6 +100,7 @@
             const auto c=themeDraft[n];rgb[n]=(std::uint32_t(c.r)<<16)|(std::uint32_t(c.g)<<8)|c.b;
         }
         io::writeFileAtomic(path,io::encodeTheme(rgb));
+        themeSavePath=path;
         mode=Mode::ThemeColors;notify("THEME FILE SAVED / APPLY TO USE");
     }
 
@@ -101,27 +129,61 @@
         if(index<0||index>=int(themeFiles.size()))return;
         const auto path=themeFiles[std::size_t(index)];
         if(themeSaving){requestThemeSave(path);return;}
-        if(std::filesystem::file_size(path)>65536)throw std::runtime_error("THEME FILE IS TOO LARGE");
-        const auto loaded=io::decodeTheme(io::readFile(path));
-        themeDraft=colorPalette(loaded);mode=Mode::ThemeColors;
+        const auto loaded=readThemeFilePalette(path);
+        themeDraft=loaded;mode=Mode::ThemeColors;
         notify("THEME LOADED / APPLY TO USE");
+    }
+
+    void drawThemePreview(const std::array<SDL_Color,13>& c,int x,int y) {
+        rect(x,y,358,230,c[0]);outline(x,y,358,230,dim);
+        rect(x+10,y+10,338,28,c[1]);txt(x+20,y+17,"PATTERN 00",c[6]);
+        txt(x+20,y+53,"00  C-4 01 40 000",c[3]);
+        rect(x+10,y+77,338,26,c[2]);
+        txt(x+20,y+83,"01",c[4]);rect(x+64,y+78,40,24,c[7]);txt(x+64,y+83,"D-4",c[0]);
+        txt(x+120,y+83,"01",c[6]);txt(x+164,y+83,"30",c[8]);txt(x+208,y+83,"447",c[7]);
+        txt(x+20,y+113,"02  --- .. .. 000",c[5]);
+        rect(x+10,y+137,338,26,c[10]);txt(x+20,y+143,"03  E-4 01 20 000",c[3]);
+        rect(x+10,y+174,156,42,c[11]);
+        for(int n=0;n<15;++n)line(x+14+n*10,y+195,x+24+n*10,y+(n%2?207:183),c[6]);
+        txt(x+188,y+181,"PLAY",c[8]);txt(x+188,y+203,"MUTE",c[9]);
+        SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_BLEND);
+        rect(x+306,y+10,42,210,c[12]);
+        SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_NONE);
     }
 
     void drawThemeFiles() {
         const int count=int(themeFiles.size())+(themeSaving?1:0);
-        const auto bounds=dialogForContent({85,77,854,0},177+12*34,"LEFT/RIGHT PAGE / A SELECT / B CANCEL","FOLDER: THEMES / BESIDE THE EXECUTABLE");
+        const char* hint=themeSaving?"LEFT/RIGHT PAGE / A SELECT / B CANCEL":"UP/DOWN PREVIEW / LEFT/RIGHT PAGE / A LOAD / B CANCEL";
+        const auto bounds=themeSaving?
+            dialogForContent({85,77,854,0},177+12*34,hint,"FOLDER: THEMES / BESIDE THE EXECUTABLE"):
+            dialogForContent({60,80,904,0},515+controlHeight,hint,"FOLDER: THEMES / BESIDE THE EXECUTABLE");
         overlay();rect(bounds.x,bounds.y,bounds.w,bounds.h,panel);outline(bounds.x,bounds.y,bounds.w,bounds.h,dim);
-        txt(109,102,themeSaving?"SAVE THEME":"LOAD THEME",cyan,3);
+        txt(themeSaving?109:84,themeSaving?102:104,themeSaving?"SAVE THEME":"LOAD THEME",cyan,3);
         txt(779,112,count?number(themeFileIndex+1)+" / "+number(count):"0 / 0",muted);
         const int first=std::clamp(themeFileIndex-6,0,std::max(0,count-13));
-        if(!count)txt(119,166,"NO .THEME FILES",muted);
-        for(int n=0;n<13&&first+n<count;++n) {
-            const int index=first+n,y=153+n*34;
-            const auto name=themeSaving&&index==0?"NEW THEME...":themeFiles[std::size_t(index-(themeSaving?1:0))].filename().u8string();
-            if(index==themeFileIndex){rect(102,y-7,820,31,panel2);rect(102,y-7,focusBarWidth,31,amber);}
-            txt(119,y,ui::fit(name,65),index==themeFileIndex?amber:ink);
+        const int listX=themeSaving?102:84,listWidth=themeSaving?820:474;
+        if(!themeSaving) {
+            // Keep the editor's preview and outer frame stationary while its
+            // left-hand RGB controls are replaced by the file list.
+            txt(586,173,"PREVIEW",muted);
+            if(themeFilePreview)drawThemePreview(*themeFilePreview,582,207);
+            else {
+                rect(582,207,358,230,bg);outline(582,207,358,230,dim);
+                txt(598,309,count?"PREVIEW UNAVAILABLE":"NO .THEME FILES",muted);
+            }
+            if(count) {
+                txt(586,463,ui::fit(themeFiles[std::size_t(themeFileIndex)].stem().u8string(),29),ink);
+                if(!themeFilePreviewError.empty())txt(586,497,themeFilePreviewError,red);
+            }
         }
-        drawDialogFooter(bounds,"LEFT/RIGHT PAGE / A SELECT / B CANCEL","FOLDER: THEMES / BESIDE THE EXECUTABLE");
+        if(!count)txt(listX+17,166,"NO .THEME FILES",muted);
+        for(int n=0;n<13&&first+n<count;++n) {
+            const int index=first+n,y=153+n*(themeSaving?34:30);
+            const auto name=themeSaving&&index==0?"NEW THEME...":themeFiles[std::size_t(index-(themeSaving?1:0))].filename().u8string();
+            if(index==themeFileIndex){rect(listX,y-7,listWidth,themeSaving?31:28,panel2);rect(listX,y-7,focusBarWidth,themeSaving?31:28,amber);}
+            txt(listX+17,y,ui::fit(name,themeSaving?65:36),index==themeFileIndex?amber:ink);
+        }
+        drawDialogFooter(bounds,hint,"FOLDER: THEMES / BESIDE THE EXECUTABLE");
     }
 
     void drawThemeColors() {
@@ -146,23 +208,8 @@
         txt(154,417,"#"+hex((int(color.r)<<16)|(int(color.g)<<8)|int(color.b),6),ink);
         txt(394,417,number(themeRole+1)+" / "+number(themeDraft.size()),muted);
 
-        const auto& c=themeDraft;
         txt(586,173,"PREVIEW",muted);
-        rect(582,207,358,230,c[0]);outline(582,207,358,230,dim);
-        rect(592,217,338,28,c[1]);txt(602,224,"PATTERN 00",c[6]);
-        txt(602,260,"00  C-4 01 40 000",c[3]);
-        rect(592,284,338,26,c[2]);
-        txt(602,290,"01",c[4]);rect(646,285,40,24,c[7]);txt(646,290,"D-4",c[0]);
-        txt(702,290,"01",c[6]);txt(746,290,"30",c[8]);txt(790,290,"447",c[7]);
-        txt(602,320,"02  --- .. .. 000",c[5]);
-        rect(592,344,338,26,c[10]);txt(602,350,"03  E-4 01 20 000",c[3]);
-        rect(592,381,156,42,c[11]);
-        for(int n=0;n<15;++n)line(596+n*10,402,606+n*10,n%2?414:390,c[6]);
-        txt(770,388,"PLAY",c[8]);txt(770,410,"MUTE",c[9]);
-        // Make the overlay's tint visible without obscuring the editor controls.
-        SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_BLEND);
-        rect(888,217,42,210,c[12]);
-        SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_NONE);
+        drawThemePreview(themeDraft,582,207);
 
         labelValue(84,466,"LOAD THEME","",themeField==4&&themeFileAction==0,421);
         labelValue(519,466,"SAVE THEME","",themeField==4&&themeFileAction==1,421);

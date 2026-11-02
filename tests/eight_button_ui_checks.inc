@@ -544,7 +544,7 @@
             resetEightButtons();
 
             // Waveform zeroing uses the same two-button chord without canceling.
-            changePage(Page::Sample);sampleField=11;
+            changePage(Page::Sample);sampleField=12;
             currentSample()->pcm[0]=8192;playback->load(doc);
             const auto beforeWave=io::encodeXm(doc);
             for(bool reversePress:{false,true})for(bool reverseRelease:{false,true}) {

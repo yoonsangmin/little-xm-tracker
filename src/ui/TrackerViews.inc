@@ -30,7 +30,7 @@
         }
         const bool previewPlaying=playback->previewPlaying();
         std::string state = transport.playing ? (transport.rowAudition?"PLAY ROW":transport.loopFirstRow>=0?"PLAY LOOP":playingPattern?"PLAY PATTERN":"PLAY SONG") : previewPlaying?"LISTEN":"STOP";
-        if(page==Page::Song && !playingPattern){
+        if(transport.playing&&!playingPattern&&!transport.rowAudition&&transport.loopFirstRow<0){
             const auto seconds=static_cast<std::uint64_t>(std::max(0.0,transport.elapsedSeconds));
             const auto minutes=number(seconds/60),remainder=number(seconds%60);
             state+=std::string("  ")+(minutes.size()<2?"0":"")+minutes+":"+(remainder.size()<2?"0":"")+remainder;
@@ -191,9 +191,6 @@
             const int top=y+32, bottom=y+cardHeight-9;
             const int center=(top+bottom)/2, amplitude=std::max(1,(bottom-top)/2);
             line(left,center,right,center,dim);
-            const float level=live?std::clamp(state.peak,0.f,1.f):0.f;
-            rect(left,y+cardHeight-6,right-left+1,3,dim);
-            rect(left,y+cardHeight-6,int((right-left+1)*level),3,level>0.9f?amber:green);
             if (live) {
                 int lastX=left;
                 int lastY=center-int(state.waveform[0])*amplitude/32768;
@@ -368,7 +365,9 @@
                 "Key map / Settings - Switch instrument view", "Sample - A opens editor / A+B deletes this slot",
                 "Key map - A+DPAD changes this note's sample"};
             context=meanings[std::clamp(instrumentField,0,14)];
-            if(instrumentField==14)context=noteName(keymapNote)+" - A+DPAD maps sample / A+B resets to 00";
+            if(instrumentField==14)context=hasKeymapSelection()?
+                "Key map - A+DPAD edit range / B copy / A+B cut":
+                noteName(keymapNote)+" - A+DPAD maps sample / B+UP/DOWN page / B settings";
         } else {
             static const char* meanings[]={
                 "Volume - Default sample volume, 00 to 40", "Panning - Default position, 00 left to FF right",
@@ -376,10 +375,14 @@
                 "Loop type - Off, forward or ping-pong", "Loop start - First sample frame to repeat",
                 "Loop end - First frame after the repeat range", "Selection start - First selected frame",
                 "Selection end - First frame after the selected range", "Name - Rename this sample",
-                "Load - Import audio", "Draw - Edit PCM or create a short wave",
-                "", "",
+                "Load - Import audio", "New wave - Create a replacement sample; APPLY commits it",
+                "Draw - Edit the selected range, or the whole sample", "",
                 "Process - Open tools; keep the selected sample range"};
             context=meanings[std::clamp(sampleField,0,14)];
+            if(sampleField>=5&&sampleField<=8) {
+                static const char* names[]={"Loop start","Loop end","Selection start","Selection end"};
+                context=std::string(names[sampleField-5])+" - A+DPAD edit / HOLD faster / A+B zero";
+            }
         }
         std::string detail;
         if(page==Page::Pattern) {

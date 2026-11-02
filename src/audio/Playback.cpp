@@ -22,6 +22,22 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+// PlayerSTD keeps envelope clocks private and exposes this friend to tracker
+// adapters in MILKYTRACKER builds. We compile only MilkyPlay, never upstream's
+// PlayerController.cpp (which defines its own PlayerStatusTracker).
+class PlayerStatusTracker {
+public:
+    static brick::InstrumentPreviewStatus envelopeState(PlayerSTD& player) {
+        if (!player.chninfo || !player.isChannelPlaying(0)) return {};
+        const auto& channel = player.chninfo[0];
+        const auto tick = [](const auto& envelope) {
+            return envelope.envstruc && (envelope.envstruc->type & 1) && envelope.envstruc->num
+                ? int(envelope.step) : -1;
+        };
+        return {true, int(channel.ins), tick(channel.venv), tick(channel.penv)};
+    }
+};
+
 namespace brick {
 namespace {
 
@@ -124,13 +140,34 @@ public:
     bool isHeldRowPreview() const { return heldRowPreview_; }
     bool needsPreviewPattern() const { return heldRowPreview_ && !idle; }
     bool isReadingPreviewRow() const { return needsPreviewPattern() && !heldRowEnded_; }
+    void beginInstrumentPreview(int instrument) {
+        instrumentPreview_ = PlayerStatusTracker::envelopeState(*this);
+        if (instrumentPreview_.instrument != instrument) instrumentPreview_ = {};
+    }
+    void clearInstrumentPreview() { instrumentPreview_ = {}; }
+    InstrumentPreviewStatus instrumentPreview() {
+        return instrumentPreview_.active && isChannelPlaying(0) ? instrumentPreview_ : InstrumentPreviewStatus{};
+    }
+    void watchPreviewEnvelope(const Envelope& envelope) {
+        clearPreviewEnvelope();
+        // Only a fresh isolated note has a predictable envelope clock. A loop
+        // or sustain can revisit/hold zero without being finished.
+        if ((envelope.flags & 7) == 1 && envelope.count &&
+            envelope.points[envelope.count - 1].y == 0)
+            previewEnvelopeEndTick_ = envelope.points[envelope.count - 1].x;
+    }
+    void clearPreviewEnvelope() { previewEnvelopeEndTick_ = -1; previewEnvelopeTicks_ = 0; }
     void beginHeldRowPreview() {
+        clearInstrumentPreview();
+        clearPreviewEnvelope();
         heldRowPreview_ = true;
         heldRowEnded_ = false;
         BPMCounter = 0;
         setIdle(false);
     }
     void stopAudition() {
+        clearInstrumentPreview();
+        clearPreviewEnvelope();
         if (heldRowPreview_) {
             // A row may have changed global volume, tempo or effect flags.
             // Reset its sequencer as well as voices before isolated note use.
@@ -147,6 +184,8 @@ public:
         clearRenderOrderRange();
         heldRowPreview_ = false;
         heldRowEnded_ = false;
+        clearInstrumentPreview();
+        clearPreviewEnvelope();
         if (resetMixer) clearMonitorNotes();
         PlayerSTD::restart(startPosition, startRow, resetMixer, customPanningTable, oneRowOnly);
     }
@@ -187,12 +226,26 @@ public:
         if (rawAdder) lastRunningAdder_ = rawAdder;
         const auto previousSync = synccnt;
         const bool finishHeldRow = heldRowPreview_ && heldRowEnded_ && tickDue && !idle && !halted;
+        // update() applies the current envelope step, then advances it. Capture
+        // before the real tick so a loop wrap is not displayed one tick early.
+        if (tickDue && !paused && instrumentPreview_.active)
+            instrumentPreview_ = PlayerStatusTracker::envelopeState(*this);
         if (correctTiming) adder = packetAdder;
         PlayerSTD::timerHandler(packet);
         // Every upstream tempo/base-tempo write also calculates a new raw
         // adder. Otherwise restore ours, including several Fxx commands that
         // finish at the original BPM. Zero is a halt/one-row stop, never undo it.
         if (correctTiming && adder && bpm == oldBpm && baseBpm == oldBaseBpm) adder = rawAdder;
+        if (tickDue && !paused && previewEnvelopeEndTick_ >= 0) {
+            if (previewEnvelopeTicks_ <= previewEnvelopeEndTick_) ++previewEnvelopeTicks_;
+            // update() applies volume before advancing the envelope. Wait for
+            // its final zero to reach the mixer, then let stopSample ramp out.
+            // Counting engine ticks also preserves initial/mid-envelope rests.
+            if (previewEnvelopeTicks_ > previewEnvelopeEndTick_ && getVol(0) == 0) {
+                stopSample(0);
+                clearPreviewEnvelope();
+            }
+        }
         // The scratch pattern supplies a blank row after the selected one.
         // Its first tick naturally clears upstream's row-effect overrides
         // (DFS/DVS), without retriggering notes or changing instrument state.
@@ -249,6 +302,8 @@ private:
     bool renderRangeEnded_ = false;
     bool heldRowPreview_ = false;
     bool heldRowEnded_ = false;
+    int previewEnvelopeEndTick_ = -1, previewEnvelopeTicks_ = 0;
+    InstrumentPreviewStatus instrumentPreview_;
     int loopFirstRow_ = -1, loopEndRow_ = -1;
     mp_uint32 lastRunningAdder_ = 0;
     std::array<int,32> monitorNotes_{};
@@ -803,6 +858,10 @@ DocumentUpdateResult Playback::updateDocument(const Document& document) {
         if (compatible) {
             auto& current = *impl_->core;
             auto& prepared = replacement->module;
+            // A live envelope edit can invalidate elapsed-tick assumptions.
+            // The editor retriggers its audition after edits; direct callers
+            // may preserve the voice, so leave its lifetime to the caller.
+            current.audition.clearPreviewEnvelope();
             // Keep XModule and envelope addresses stable. Active sample voices
             // retain their old PCM until retrigger/stop; new notes use new PCM.
             // Retired allocations remain in this module's pool and cannot dangle.
@@ -922,6 +981,8 @@ void Playback::previewNote(int instrumentOneBased, int noteXm) {
     core.sampleDraft.reset();
     if (core.audition.isHeldRowPreview()) core.audition.stopAudition();
     core.audition.playNote(0, noteXm, instrumentOneBased);
+    core.audition.beginInstrumentPreview(instrumentOneBased);
+    core.audition.watchPreviewEnvelope(core.document.instruments[instrumentOneBased - 1].volumeEnvelope);
     if (hadSamplePreview && !core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
 }
 
@@ -962,6 +1023,7 @@ void Playback::previewSample(int instrumentOneBased, int sampleIndex, int noteXm
         throw std::out_of_range("Playback sample");
     const auto& sample = core.module.smp[(instrumentOneBased - 1) * 16 + sampleIndex];
     if (!sample.sample || sample.samplen == 0) {
+        core.audition.clearInstrumentPreview();
         core.resetSamplePreview();
         core.sampleDraft.reset();
         if (!core.song.transport().playing) impl_->bufferedOffset = impl_->blockFrames;
@@ -971,6 +1033,7 @@ void Playback::previewSample(int instrumentOneBased, int sampleIndex, int noteXm
     const auto rangeEnd = end < 0 ? sampleLength : end;
     if (start < 0 || start >= rangeEnd || rangeEnd > sampleLength)
         throw std::out_of_range("Sample preview range");
+    core.audition.clearInstrumentPreview();
     // A live mixer voice otherwise crossfades into a queued replacement while
     // getSamplePos() still describes the old sample. Start the new audition
     // immediately, with its normal fade-in and matching source identity.
@@ -1003,6 +1066,7 @@ void Playback::previewSample(const Sample& source, int noteXm) {
     {
         DeviceLock lock(impl_->device, impl_->stateMutex);
         auto& core = impl_->requireCore();
+        core.audition.clearInstrumentPreview();
         core.resetSamplePreview();
         core.sampleDraft.swap(replacement);
         const auto& sample = core.sampleDraft->sample;
@@ -1056,6 +1120,11 @@ SamplePreviewStatus Playback::samplePreviewStatus() const {
     if (!core.sample.isChannelPlaying(0) || core.samplePreviewEndFrame <= core.samplePreviewFirstFrame) return {};
     const auto frame = std::clamp(core.sample.getSamplePos(0), core.samplePreviewFirstFrame, core.samplePreviewEndFrame - 1);
     return {true, core.samplePreviewInstrument, core.samplePreviewIndex, static_cast<std::size_t>(frame)};
+}
+
+InstrumentPreviewStatus Playback::instrumentPreviewStatus() const {
+    DeviceLock lock(impl_->device, impl_->stateMutex);
+    return impl_->core ? impl_->core->audition.instrumentPreview() : InstrumentPreviewStatus{};
 }
 
 void Playback::setSolo(int channel) {

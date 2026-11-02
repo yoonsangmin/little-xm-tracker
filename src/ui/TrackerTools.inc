@@ -93,9 +93,8 @@
             return result;
         };
         auto add=[](std::vector<Action>& list,std::string title,std::string detail,std::function<void()> fn){list.push_back({std::move(title),std::move(detail),std::move(fn)});};
-        auto project=take({"SAVE XM","SAVE XM AS","OPEN XM","RENDER WAV","CLEAN UP PATTERNS","CLEAN UP INSTRUMENTS","NEW SONG"});
+        auto project=take({"SAVE XM","SAVE XM AS","OPEN XM","RENDER WAV","CLEAN UP SONG","NEW SONG"});
         add(project,"RENAME SONG","20 BYTE XM SONG TITLE / ASCII INPUT",[this]{rename(NameTarget::Song);});
-        add(project,"MINIMISE ALL INSTRUMENTS","TRIM ALL SAMPLE TAILS AFTER LOOP END",[this]{minimiseSamples(2);});
         auto song=take({"INSERT ORDER","DUPLICATE PATTERN","NEW EMPTY PATTERN","MOVE ORDER UP","MOVE ORDER DOWN"});
         auto patternTools=take({"CLEAR FIELD"});
         add(patternTools,"MARK BLOCK START","MOVE CURSOR, THEN B COPIES THE RECTANGLE",[this]{blockSelected=true;blockRow=row;blockChannel=channel;blockField=field;blockPattern=patternIndex();notify("BLOCK MARKED / MOVE CURSOR / B COPY");});
@@ -132,8 +131,8 @@
         add(sampleTools,"ZOOM TO SELECTION","",[this]{if(selectionEnd<=selectionStart)throw std::runtime_error("SELECT A PCM RANGE FIRST");waveformZoom=true;});
         add(sampleTools,"SHOW WHOLE WAVEFORM","",[this]{waveformZoom=false;});
         add(sampleTools,"COPY PCM","COPY SELECTION; EMPTY SELECTION MEANS ALL",[this]{pcmClipboard=edit::copyPcm(*currentSampleChecked(),selectedFrames());notify("PCM COPIED");});
-        add(sampleTools,"CUT PCM","COPY THEN DELETE SELECTED FRAMES",[this]{const auto range=selectedFrames();pcmClipboard=edit::copyPcm(*currentSample(),range);mutate([&]{edit::deletePcm(*currentSample(),range);});selectionEnd=selectionStart;});
-        add(sampleTools,"PASTE PCM","REPLACE SELECTION OR INSERT AT ITS START",[this]{if(!pcmClipboard)throw std::runtime_error("COPY PCM FIRST");const auto range=selectedFrames(false);mutate([&]{edit::pastePcm(*currentSample(),range,*pcmClipboard);});selectionEnd=selectionStart+int(pcmClipboard->pcm.size());normalize();});
+        add(sampleTools,"CUT PCM","COPY THEN DELETE SELECTED FRAMES",[this]{auto* s=currentSampleChecked();const auto range=selectedFrames();pcmClipboard=edit::copyPcm(*s,range);mutate([&]{edit::deletePcm(*s,range);},"CUT");selectionEnd=selectionStart;clearSelection();notify("PCM CUT / PROCESS > PASTE PCM");});
+        add(sampleTools,"PASTE PCM","REPLACE SELECTION OR INSERT AT ITS START",[this]{pastePcmSelection();});
         add(sampleTools,"DELETE PCM","DELETE SELECTED FRAMES; UNDO AVAILABLE",[this]{const auto range=selectedFrames();mutate([&]{edit::deletePcm(*currentSample(),range);});selectionEnd=selectionStart;});
         const std::array<std::pair<const char*,edit::SampleTransform>,7> transforms={{{"REVERSE",edit::SampleTransform::Reverse},{"NORMALIZE",edit::SampleTransform::Normalize},{"FADE IN",edit::SampleTransform::FadeIn},{"FADE OUT",edit::SampleTransform::FadeOut},{"SILENCE",edit::SampleTransform::Silence},{"INVERT POLARITY",edit::SampleTransform::Invert},{"REMOVE DC",edit::SampleTransform::RemoveDc}}};
         for(const auto& t:transforms)add(sampleTools,t.first,"APPLY TO SELECTION; EMPTY SELECTION MEANS ALL",[this,op=t.second]{transformPcm(op);});
@@ -153,7 +152,7 @@
         actions=take({"UNDO","REDO"});
         if(page==Page::Song){
             actions.push_back(groupAction("ORDER MANAGEMENT","INSERT / DUPLICATE / EMPTY / MOVE",song));
-            actions.push_back(groupAction("PROJECT","RENDER / CLEAN UP / MINIMISE",select(project,{"RENDER WAV","CLEAN UP PATTERNS","CLEAN UP INSTRUMENTS","MINIMISE ALL INSTRUMENTS"})));
+            actions.push_back(groupAction("PROJECT","RENDER / CLEAN UP",select(project,{"RENDER WAV","CLEAN UP SONG"})));
         }else if(page==Page::Pattern){
             actions.push_back({"PATTERN LIST","ALL 256 NUMBERS / OPEN OR CLEAR CONTENTS",[this]{openSlotList(false);}});
             const auto rows=select(patternTools,{"INSERT ROW","DELETE ROW","EXPAND PATTERN","SHRINK PATTERN"});
@@ -169,7 +168,7 @@
             actions.push_back(groupAction("KEY MAP RANGE","ASSIGN SEVERAL KEYS AT ONCE",select(instrumentTools,{"MAP RANGE FIRST NOTE","MAP RANGE LAST NOTE","ASSIGN RANGE TO SAMPLE"})));
         }else{
             actions.push_back(groupAction("SAMPLE MANAGEMENT","COPY / PASTE / SWAP / DELETE / EXPORT / RECORD",select(sampleTools,{"COPY SAMPLE SLOT","PASTE SAMPLE SLOT","SWAP SAMPLE SLOT","DELETE SAMPLE","EXPORT SAMPLE WAV","RECORD MICROPHONE"})));
-            auto processing=select(sampleTools,{"LOOP FROM SELECTION","TRIM SAMPLE TO SELECTION","MINIMISE SAMPLE","REVERSE","CONVERT TO 8-BIT","CONVERT TO 16-BIT","ZOOM TO SELECTION","SHOW WHOLE WAVEFORM","EXPORT SAMPLE WAV"});
+            auto processing=select(sampleTools,{"CUT PCM","PASTE PCM","LOOP FROM SELECTION","TRIM SAMPLE TO SELECTION","MINIMISE SAMPLE","REVERSE","CONVERT TO 8-BIT","CONVERT TO 16-BIT","ZOOM TO SELECTION","SHOW WHOLE WAVEFORM","EXPORT SAMPLE WAV"});
             processing.insert(processing.begin(),groupAction("AMPLITUDE","LEVEL / FADES / POLARITY / DC",select(sampleTools,{"NORMALIZE","GAIN PERCENT","FADE IN","FADE OUT","SILENCE","INVERT POLARITY","REMOVE DC"})));
             actions.push_back(groupAction("PCM PROCESSING","EDIT PCM / TRIM SELECTION / MINIMISE LOOP TAIL",std::move(processing)));
             for(const auto& a:select(sampleTools,{"ADVANCED PCM"}))actions.push_back(a);
@@ -429,7 +428,9 @@
     void drawEnvelopeEditor() {
         const char* hints="A+DPAD EDIT / A+B CUT / SELECT+A PASTE / B BACK / SELECT+LEFT/RIGHT VOLUME/PAN / START LISTEN/STOP";
         drawToolPanel(envelopePan?"PANNING ENVELOPE":"VOLUME ENVELOPE",584+controlHeight,hints);const auto& e=currentEnvelope();
-        envelope(85,150,530,220,e);
+        const auto preview=playback->instrumentPreviewStatus();
+        const int playbackTick=preview.active&&preview.instrument==instrument?(envelopePan?preview.panningTick:preview.volumeTick):-1;
+        envelope(85,150,530,220,e,playbackTick);
         if(e.count){const int maxX=std::max(1,int(e.points[e.count-1].x));const auto& p=e.points[std::size_t(envelopePoint)];outline(85+int(p.x)*522/maxX-5,150+214-int(p.y)*210/64-5,11,11,amber);}
         txt(85,392,"PT   TICK   VALUE",muted);
         for(int n=0;n<e.count;++n){const int col=n/6,r=n%6;txt(85+col*268,424+r*31,hex(n)+"   "+hex(e.points[n].x,4)+"   "+hex(e.points[n].y),n==envelopePoint?amber:ink);}

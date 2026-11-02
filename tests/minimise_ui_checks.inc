@@ -122,13 +122,16 @@
             expectedAll.instruments[0].samples[0].pcm.resize(10);expectedAll.instruments[0].samples[1].pcm.resize(8);
             expectedAll.instruments[1].samples[0].pcm.resize(15);
             menu("MINIMISE ALL INSTRUMENTS");
-            require(mode==Mode::Confirm&&confirmTitle=="MINIMISE ALL INSTRUMENTS?"&&confirmDetail=="3 SAMPLES / 59 PCM BYTES AFTER LOOP END",
-                    "Song Project Minimise includes loop tails in unused instruments without removing their slots");
+            require(mode==Mode::Confirm&&confirmTitle=="CLEAN UP SONG?"&&confirmDetail.find("3 SAMPLE TAILS")!=std::string::npos,
+                    "Song cleanup with only sample tails enabled includes unused instruments without removing their slots");
             tap(Button::B);require(io::encodeXm(doc)==allBefore&&undoStack.empty()&&!dirty,"canceling the whole-song batch changes no instrument");
             menu("MINIMISE ALL INSTRUMENTS");tap(Button::A);
             require(io::encodeXm(doc)==io::encodeXm(expectedAll)&&undoStack.size()==1,
                     "all-instrument Minimise preserves IDs, key maps, envelopes, loop metadata and every uncut PCM prefix");
-            checkMinimiseClipboards(savedSampleClipboard,savedInstrumentClipboard);
+            require(!clipboard&&pcmClipboard&&pcmClipboard->pcm==std::vector<std::int16_t>({256,-512,768})&&!pcmClipboard->sixteenBit&&
+                    sampleClipboard&&sampleClipboardBytes(*sampleClipboard)==savedSampleClipboard&&
+                    instrumentClipboard&&io::encodeXi(*instrumentClipboard)==savedInstrumentClipboard,
+                    "Song cleanup clears cell references while retaining independent PCM, sample and instrument copies");
             undo();require(io::encodeXm(doc)==allBefore,"the complete all-instrument batch restores with one Undo");
             undo(true);require(io::encodeXm(doc)==io::encodeXm(expectedAll),"whole-song Redo reproduces the exact minimised XM");
             const auto allNoopUndo=undoStack.size(),allNoopRedo=redoStack.size();const auto allNoopRevision=documentRevision,allNoopRecovery=recoverySerial;

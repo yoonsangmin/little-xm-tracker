@@ -9,6 +9,47 @@
     bool orderBlockSelected=false, pcmSelecting=false;
     std::vector<std::uint8_t> orderBlockClipboard;
 
+    static int sampleRangeStep(int length,bool coarse,Uint32 heldMs) {
+        if(coarse) {
+            const int scale=heldMs>=1400?16:heldMs>=600?4:1;
+            return std::min(std::max(1,length),std::max(1,length/100)*scale);
+        }
+        // Preserve single-frame taps; sustained movement covers PCM at roughly
+        // one plotted pixel per repeat, rather than crawling through long files.
+        return heldMs>=1400?std::max(16,length/1024):heldMs>=600?std::max(4,length/4096):1;
+    }
+    void resetSampleField() {
+        auto* s=currentSample();
+        if(sampleField==7||sampleField==8) {
+            if(sampleField==7)selectionStart=0;
+            else {selectionStart=selectionEnd=0;clearSelection();}
+            normalize();rememberSampleFocus();notify("SELECTION VALUE RESET");
+            return;
+        }
+        if(!s||sampleField<0||sampleField>6)return;
+        mutate([&]{
+            switch(sampleField) {
+            case 0:s->volume=0;break;
+            case 1:s->panning=0;break;
+            case 2:s->finetune=0;break;
+            case 3:s->relativeNote=0;break;
+            case 4:s->loopType=0;break;
+            case 5:
+                if(!s->loopStart)break;
+                s->loopLength=std::uint32_t(std::min(std::uint64_t(s->loopStart)+s->loopLength,
+                    std::uint64_t(s->pcm.size())));
+                s->loopStart=0;
+                if(!s->loopLength)s->loopType=0;
+                break;
+            case 6:
+                // An end at frame zero cannot follow a nonzero start.
+                s->loopStart=s->loopLength=0;s->loopType=0;
+                break;
+            }
+        },"RESET SAMPLE VALUE");
+        notify("SAMPLE VALUE RESET");
+    }
+
     static std::uint8_t adjustVolumeColumn(std::uint8_t value,int direction,bool coarse) {
         // Skip XM's reserved byte ranges. Within commands, horizontal edits
         // change only x; vertical edits choose the command, preserving x.
@@ -69,10 +110,12 @@
 
     void clearSelection() {
         blockSelected=false;blockSelectStage=0;orderBlockSelected=false;orderSelectStage=0;pcmSelecting=false;pcmSelectStage=0;
+        keymapSelected=false;keymapSelectStage=0;keymapSelectionOwner=0;
     }
     bool hasSelection() const {
         if(page==Page::Pattern)return blockSelected&&blockPattern==patternIndex();
         if(page==Page::Song)return orderBlockSelected;
+        if(page==Page::Instrument)return hasKeymapSelection();
         return page==Page::Sample&&(pcmSelecting||selectionEnd>selectionStart);
     }
     void cancelSelection() {
@@ -91,10 +134,12 @@
             const int last=orderBlockSelected?std::max(order,orderBlockStart):order;
             orderBlockClipboard.assign(doc.orders.begin()+first,doc.orders.begin()+last+1);
             orderClipboard=doc.orders[std::size_t(first)];notify("ORDERS COPIED / SELECT+A PASTE");
+        } else if(keymapContext()) {
+            copyKeymap();
         } else if(page==Page::Sample) {
             pcmClipboard=edit::copyPcm(*currentSampleChecked(),selectedFrames());
             selectionStart=selectionEnd=0;
-            notify("PCM COPIED / SELECT+A PASTE");
+            notify("PCM COPIED / PROCESS > PASTE PCM");
         }
         clearSelection();
     }
@@ -114,6 +159,8 @@
             else if(orderSelectStage<2){orderBlockStart=0;order=int(doc.orders.size())-1;orderSelectStage=2;}
             else {cancelSelection();return;}
             notify("ORDERS SELECTED / UP-DOWN EXTEND / B COPY");
+        } else if(keymapContext()) {
+            selectKeymap();
         } else if(page==Page::Sample) {
             auto* s=currentSample();if(!s||s->pcm.empty())return;
             if(!pcmSelecting){
@@ -121,8 +168,14 @@
                 pcmSelecting=true;pcmSelectStage=1;
             }else if(pcmSelectStage<2){selectionStart=0;selectionEnd=int(s->pcm.size());pcmSelectStage=2;}
             else {cancelSelection();return;}
-            sampleField=8;rememberSampleFocus();notify("PCM SELECTED / A+DPAD RANGE / B COPY / A+B CUT");
+            sampleField=8;rememberSampleFocus();notify("PCM SELECTED / A+DPAD RANGE / B COPY / PROCESS TOOLS");
         }
+    }
+    void pastePcmSelection() {
+        if(!pcmClipboard)throw std::runtime_error("COPY PCM FIRST");
+        const auto range=selectedFrames(false);
+        if(!pcmClipboard->pcm.empty()||range.last>range.first)mutate([&]{edit::pastePcm(editableSample(),range,*pcmClipboard);},"PASTE");
+        selectionEnd=selectionStart+int(pcmClipboard->pcm.size());normalize();clearSelection();notify("PCM PASTED");
     }
     void pasteCurrent() {
         finishGesture();
@@ -136,11 +189,8 @@
                 if(doc.orders.size()<end)doc.orders.resize(end,0);
                 std::copy(orderBlockClipboard.begin(),orderBlockClipboard.end(),doc.orders.begin()+destination);order=destination;songAppendOrder=false;
             },"PASTE");notify("ORDERS PASTED");
-        } else if(page==Page::Sample) {
-            if(!pcmClipboard)throw std::runtime_error("COPY PCM FIRST");
-            const auto range=selectedFrames(false);
-            if(!pcmClipboard->pcm.empty()||range.last>range.first)mutate([&]{edit::pastePcm(editableSample(),range,*pcmClipboard);},"PASTE");
-            selectionEnd=selectionStart+int(pcmClipboard->pcm.size());normalize();notify("PCM PASTED");
+        } else if(keymapContext()) {
+            pasteKeymap();
         }
         clearSelection();
     }
@@ -170,15 +220,12 @@
                 if(last-first+1==int(doc.orders.size())){doc.orders={0};doc.restart=0;}
                 else for(int at=last;at>=first;--at)edit::removeOrder(doc,at);
             },"CUT");order=std::min(first,int(doc.orders.size())-1);notify("ORDERS CUT / PATTERN CONTENTS KEPT");
-        } else if(page==Page::Sample&&currentSample()) {
-            const auto range=selectedFrames();
-            pcmClipboard=edit::copyPcm(*currentSampleChecked(),range);
-            mutate([&]{edit::deletePcm(*currentSample(),range);},"CUT");selectionEnd=selectionStart;
-            notify("PCM CUT / SELECT+A PASTE");
+        } else if(page==Page::Sample) {
+            resetSampleField();return;
         } else if(page==Page::Instrument&&instrumentField==13) {
             deleteCurrentSample();
-        } else if(page==Page::Instrument&&instrumentField==14&&currentInstrument()) {
-            mutate([&]{currentInstrument()->noteToSample[keymapNote-1]=0;});notify("KEY MAP RESET TO SAMPLE 00");
+        } else if(keymapContext()) {
+            cutKeymap();
         } else if(page==Page::Instrument&&instrumentField<8&&currentInstrument()) {
             if(instrumentField==0)sample=0;
             else if(instrumentField==1)keymapNote=49;
@@ -194,6 +241,10 @@
     void navigateWithB(Button b) {
         finishGesture();bUsed=true;
         const bool vertical=b==Button::Up||b==Button::Down;
+        if(keymapContext()&&vertical) {
+            playback->stopPreview();keymapNote=std::clamp(keymapNote+(b==Button::Down?24:-24),1,96);
+            return;
+        }
         if(page==Page::Song&&songField!=12&&!vertical)return;
         if(page!=Page::Pattern||vertical||hasSelection())followPlayback=false;
         playback->stopPreview();clearSelection();
@@ -226,5 +277,6 @@
         if(sampleField==14)openSampleProcessing();
         else if(sampleField==9)rename(NameTarget::Sample);
         else if(sampleField==10)openBrowser(FileAction::ImportAudio);
-        else if(sampleField==11)openWaveDraw();
+        else if(sampleField==11)openNewWave();
+        else if(sampleField==12)openWaveDraw();
     }

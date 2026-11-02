@@ -57,6 +57,9 @@
             }
             const auto savedThemePreferences=io::readFile(home/"editor-settings.txt");
             const auto savedThemePalette=palette;
+            const auto savedThemeLoadPath=themeLoadPath,savedThemeSavePath=themeSavePath;
+            const auto savedThemeLoadIndex=themeLoadIndex,savedThemeSaveIndex=themeSaveIndex;
+            themeLoadPath.clear();themeSavePath.clear();themeLoadIndex=themeSaveIndex=0;
             const auto themeFileSong=io::encodeXm(doc);
             const auto themeFileDirty=dirty;
             const auto themeFileUndo=undoStack.size(),themeFileRedo=redoStack.size();
@@ -83,6 +86,8 @@
             io::writeFileAtomic(sharedPath,io::encodeTheme(shared));
             const auto malformedPath=themeDirectory/("qa-malformed-"+token+".theme");
             io::writeFileAtomic(malformedPath,{'b','a','d'});
+            const auto oversizedPath=themeDirectory/("qa-oversized-"+token+".theme");
+            io::writeFileAtomic(oversizedPath,std::vector<std::uint8_t>(65537,' '));
             io::writeFileAtomic(themeDirectory/("qa-ignored-"+token+".txt"),{'x'});
             const auto blockedName="qa-blocked-"+token;
             const auto blockedPath=themeDirectory/(blockedName+".theme");
@@ -103,8 +108,8 @@
                 while(themeField<4)tap(Button::Down);
                 while(themeField>4)tap(Button::Up);
                 tap(savingTheme?Button::Right:Button::Left);tap(Button::A);
-                require(mode==Mode::ThemeFiles&&themeSaving==savingTheme&&themeFileIndex==0&&themeEditing,
-                        "theme Load and Save open their own picker at the first entry");
+                require(mode==Mode::ThemeFiles&&themeSaving==savingTheme&&themeEditing,
+                        "theme Load and Save open their own picker without leaving the draft editor");
             };
             auto focusThemePath=[&](const std::filesystem::path& path){
                 const auto found=std::find(themeFiles.begin(),themeFiles.end(),path);
@@ -114,6 +119,7 @@
                 while(themeFileIndex>target)tap(Button::Up);
             };
             openThemePicker(false);
+            require(themeFileIndex==0,"The first load picker starts at the first theme when no cursor is remembered");
             require(std::all_of(themeFiles.begin(),themeFiles.end(),[&](const auto& path){
                 return path.parent_path()==themeDirectory&&std::filesystem::is_regular_file(path)&&lower(path.extension().u8string())==".theme";
             }),"theme picker stays in its fixed folder and filters other extensions and directories");
@@ -122,14 +128,61 @@
             tap(Button::Left);require(themeFileIndex==0,"theme page-left returns one page");
             for(std::size_t n=0;n<themeFiles.size();++n)tap(Button::Right);
             require(themeFileIndex==int(themeFiles.size())-1,"repeated theme paging clamps at the last file without wrapping");
+            const auto initialDraft=paletteRgb(themeDraft);
+            for(const auto& invalidPath:{malformedPath,oversizedPath}) {
+                focusThemePath(invalidPath);draw();
+                require(!themeFilePreview&&!themeFilePreviewError.empty()&&paletteRgb(themeDraft)==initialDraft&&
+                        paletteRgb(palette)==paletteRgb(savedThemePalette)&&io::readFile(home/"editor-settings.txt")==savedThemePreferences,
+                        "Hovering malformed or oversized themes reports preview failure without changing draft, palette or preferences");
+            }
             focusThemePath(sharedPath);tap(Button::A);
             require(mode==Mode::ThemeColors&&paletteRgb(themeDraft)==shared&&paletteRgb(palette)==paletteRgb(savedThemePalette)&&
                     io::readFile(home/"editor-settings.txt")==savedThemePreferences,
                     "loading a shared theme changes only the draft until Apply");
+            openThemePicker(false);
+            require(themeFiles[std::size_t(themeFileIndex)]==sharedPath,
+                    "Reopening Load restores the last loaded theme rather than the first file");
+            const auto gameboyPath=themeDirectory/"gameboy.theme";
+            const auto gameboyTheme=io::decodeTheme(io::readFile(gameboyPath));
+            focusThemePath(gameboyPath);noticeUntil=0;draw();
+            require(themeFilePreview&&paletteRgb(*themeFilePreview)==gameboyTheme&&themeFilePreviewError.empty()&&
+                    paletteRgb(themeDraft)==shared&&paletteRgb(palette)==paletteRgb(savedThemePalette)&&
+                    io::readFile(home/"editor-settings.txt")==savedThemePreferences,
+                    "Moving to a valid theme previews it separately and drawing leaves draft and applied colors untouched");
+            int themePreviewWidth=0,themePreviewHeight=0;SDL_GetRendererOutputSize(renderer,&themePreviewWidth,&themePreviewHeight);
+            if(themePreviewWidth==W&&themePreviewHeight==H) {
+                const SDL_Rect previewBackground{585,210,1,1};std::uint32_t pixel=0;
+                require(SDL_RenderReadPixels(renderer,&previewBackground,SDL_PIXELFORMAT_ARGB8888,&pixel,sizeof(pixel))==0&&
+                        (pixel&0x00ffffffu)==gameboyTheme[0],"Load picker renders the highlighted theme in the unchanged right preview position");
+            }
+            screenshot(home/"theme-load-preview.bmp");SDL_RenderPresent(renderer);
+            const int gameboyIndex=themeFileIndex;
+            tap(Button::B);
+            require(mode==Mode::ThemeColors&&paletteRgb(themeDraft)==shared,
+                    "Canceling a hovered theme preserves the draft chosen before opening Load");
+            openThemePicker(true);require(themeFileIndex==0,"First Save starts at New independently of the Load cursor");
+            focusThemePath(sharedPath);tap(Button::B);
+            openThemePicker(false);require(themeFiles[std::size_t(themeFileIndex)]==gameboyPath,
+                    "Load remembers canceled hover independently of the Save cursor");tap(Button::B);
+            openThemePicker(true);require(themeFileIndex>0&&themeFiles[std::size_t(themeFileIndex-1)]==sharedPath,
+                    "Save restores its own selected destination independently of Load");
+            while(themeFileIndex>0)tap(Button::Up);
+            tap(Button::B);
+            openThemePicker(true);require(themeFileIndex==0&&themeSavePath.empty(),"New Theme is remembered as a distinct Save choice");tap(Button::B);
+            const auto sortedPath=themeDirectory/("000-qa-sort-"+token+".theme");
+            io::writeFileAtomic(sortedPath,io::encodeTheme(shared));
+            openThemePicker(false);
+            require(themeFiles[std::size_t(themeFileIndex)]==gameboyPath&&themeFileIndex==gameboyIndex+1,
+                    "Load restores the remembered path after new files change sorted indices");
+            focusThemePath(sortedPath);const int removedThemeIndex=themeFileIndex;tap(Button::B);
+            std::filesystem::remove(sortedPath);openThemePicker(false);
+            require(themeFileIndex==std::min(removedThemeIndex,int(themeFiles.size())-1)&&
+                    themeFiles[std::size_t(themeFileIndex)]!=sortedPath,
+                    "Removing the remembered theme falls back to a valid remembered list index");tap(Button::B);
             while(themeField>1)tap(Button::Up);
             chord({Button::Right});
             const auto firstSavedTheme=paletteRgb(themeDraft);
-            openThemePicker(true);tap(Button::A);
+            openThemePicker(true);while(themeFileIndex>0)tap(Button::Up);tap(Button::A);
             require(mode==Mode::Name&&nameTarget==NameTarget::Theme&&filename.empty(),"New Theme opens an empty gamepad filename editor");
             filename="../outside";bool badThemeName=false;
             try {tap(Button::Start);}catch(const std::exception&){badThemeName=true;buttonInput(Button::Start,false);}
@@ -142,7 +195,10 @@
 
             while(themeField>1)tap(Button::Up);
             chord({Button::Right});const auto overwrittenTheme=paletteRgb(themeDraft);
-            openThemePicker(true);focusThemePath(roundtripPath);tap(Button::A);
+            openThemePicker(true);
+            require(themeFileIndex>0&&themeFiles[std::size_t(themeFileIndex-1)]==roundtripPath,
+                    "Save reopens on the newly written theme path");
+            focusThemePath(roundtripPath);tap(Button::A);
             require(mode==Mode::Confirm,"saving an existing theme asks before overwriting");
             tap(Button::B);
             require(mode==Mode::ThemeFiles&&paletteRgb(themeDraft)==overwrittenTheme&&
@@ -158,7 +214,7 @@
                     "malformed theme load preserves the complete draft and picker selection");
             tap(Button::B);require(mode==Mode::ThemeColors,"B returns from theme files to the color editor");
 
-            openThemePicker(true);tap(Button::A);filename=blockedName;tap(Button::Start);
+            openThemePicker(true);while(themeFileIndex>0)tap(Button::Up);tap(Button::A);filename=blockedName;tap(Button::Start);
             require(mode==Mode::Confirm,"an existing destination is confirmed before a theme write");
             bool themeWriteFailed=false;
             try {tap(Button::A);}catch(const std::exception&){themeWriteFailed=true;buttonInput(Button::A,false);}
@@ -180,6 +236,9 @@
 
             io::writeFileAtomic(home/"editor-settings.txt",savedThemePreferences);palette=savedThemePalette;loadEditorSettings();
             themeDraft=palette;themeEditing=false;themeSaving=false;themeRole=themeField=themeAction=themeFileAction=themeFileIndex=0;
+            themeLoadPath=savedThemeLoadPath;themeSavePath=savedThemeSavePath;
+            themeLoadIndex=savedThemeLoadIndex;themeSaveIndex=savedThemeSaveIndex;
+            themeFilePreview.reset();themeFilePreviewError.clear();
             themeFiles.clear();nameTarget=NameTarget::File;filename.clear();confirmed={};
             mode=Mode::Normal;held.fill(false);menuParents.clear();noticeUntil=0;
         }

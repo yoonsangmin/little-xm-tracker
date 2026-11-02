@@ -29,7 +29,7 @@
                 menu("SETTINGS");
                 dialogShot("dialog-settings.bmp",{129,77,766,486});
                 openThemeColors();dialogShot("dialog-theme.bmp",{60,80,904,553});
-                openThemeFiles(false);dialogShot("dialog-theme-files.bmp",{85,77,854,588});
+                openThemeFiles(false);dialogShot("dialog-theme-files.bmp",{60,80,904,553});
                 tap(Button::B);tap(Button::B);tap(Button::B);tap(Button::B);
                 openSlotList(false);slotIndex=15;
                 dialogShot("dialog-pattern-list.bmp",{75,70,874,602});tap(Button::B);

@@ -20,7 +20,7 @@ The [manual file](docs/manual.html) is also included in the release and can be o
 - WAV, FLAC, MP3 and Ogg Vorbis import, with stereo Blend/Left/Right options and 8/16-bit conversion.
 - Sample selection editing, waveform drawing and processing; song rendering to WAV; microphone recording when an input device is available.
 - Editing during playback, selection loops, channel Mute/Solo and Undo/Redo.
-- Two recovery slots and a backup before manual overwrites. Unused patterns and instruments can be cleaned up separately.
+- Two recovery slots and a backup before manual overwrites. One Clean Up dialog offers independent removal options and optional 8-bit conversion.
 - Name display for Korean, Japanese, Chinese and basic European characters. Name entry uses English letters and numbers.
 - Custom RGB themes with load/save/share support and 31 bundled presets.
 
@@ -70,7 +70,7 @@ The app uses KNULLI's device-specific SDL2. Do not replace it with a separate SD
 | Select+Left/Right | Change screen |
 | Select alone | Cancel a selection, or open Actions when nothing is selected |
 | Hold Select, tap B | Start, expand or cancel a selection |
-| B / Select+A | Copy the selection / paste |
+| B / Select+A | Copy the selection / paste (SAMPLE uses PROCESS for PCM paste) |
 | B while playing in PATTERN, without a selection | Resume following playback |
 | B+D-Pad | Navigate pages, instruments and samples quickly |
 | Start | SONG/PATTERN: play/stop; INSTRUMENT/SAMPLE and Envelope/DRAW/CHOP: audition/stop |
@@ -78,7 +78,7 @@ The app uses KNULLI's device-specific SDL2. Do not replace it with a separate SD
 | Hold B, tap Select / Start | Mute / Solo the current channel |
 
 For button combinations, **press and hold the first button before pressing the second**. B cancels or goes back in dialogs.
-In SAMPLE, directions always move focus; edit LOOP/SELECTION START and END with A+D-Pad. PROCESS applies tools to the selection, or the whole sample when no range is selected.
+In SAMPLE, directions always move focus; edit LOOP/SELECTION START and END with A+D-Pad. A+B resets the focused numeric field. Use PROCESS → CUT PCM / PASTE PCM for audio editing; Select+A is unused here. PROCESS applies tools to the selection, or the whole sample when no range is selected.
 The [manual](docs/manual.html) covers each screen and links to effect references.
 Edit `gamecontrollerdb.txt` beside the executable to change SDL2 controller mappings. There is no mapping menu in the app.
 

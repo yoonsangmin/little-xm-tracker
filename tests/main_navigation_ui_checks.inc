@@ -20,9 +20,10 @@
             tap(Button::Up);require(songField==7,"Monitor returns to the originating Song button");
 
             page=Page::Sample;sampleField=14;sampleRowFocus.fill(-1);
-            tap(Button::Up);require(sampleField==7,"Sample PROCESS goes directly up to selection START before an endpoint has been focused");
+            tap(Button::Up);require(sampleField==8,"Sample PROCESS goes directly up to selection END before an endpoint has been focused");
             tap(Button::Down);require(sampleField==14,"Sample returns to the last button, Process");
             tap(Button::Down);tap(Button::Right);require(sampleField==14,"Sample last-row and right edges clamp");
+            tap(Button::Left);require(sampleField==12,"Sample horizontal input moves from PROCESS to DRAW in the selection box");
             tap(Button::Left);require(sampleField==4,"Sample horizontal input moves to the adjacent loop type field");
             tap(Button::Left);require(sampleField==4,"Sample loop type clamps at the left edge of the bottom row");
             tap(Button::Up);tap(Button::Down);require(sampleField==4,"Sample remembers the bottom row's loop type focus");

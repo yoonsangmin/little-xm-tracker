@@ -45,7 +45,7 @@
             for(int n=0;n<20;++n)optionChord(Button::Down);
             require(sample==15&&!currentSample(),"sample 0F is reachable inside an uncreated instrument");
             const auto beforeSample=io::encodeXm(doc);
-            sampleField=11;tap(Button::A);tap(Button::B);
+            sampleField=12;tap(Button::A);tap(Button::B);
             require(!currentInstrument()&&io::encodeXm(doc)==beforeSample,"canceling an empty-slot Draw creates neither instrument nor sample");
             sampleField=0;chord({Button::Up});
             require(io::encodeXm(doc)==beforeSample,"clamping the default sample volume does not create a sample");
@@ -53,11 +53,11 @@
             require(currentSample()&&currentSample()->volume==63&&currentInstrument()->samples.size()==16,
                     "sample metadata edit creates only the necessary slot span");
             undo();require(!currentSample()&&instrument==128&&sample==15,"undo preserves an implicit sample cursor");
-            pcmClipboard=edit::PcmClip{{0,4096,-4096,0},true};selectChord(Button::A);
+            pcmClipboard=edit::PcmClip{{0,4096,-4096,0},true};menu("PASTE PCM");
             require(currentSample()&&currentSample()->pcm==pcmClipboard->pcm,
                     "PCM paste works directly in an uncreated sample of an uncreated instrument");
             undo();sampleField=11;tap(Button::A);
-            require(wavePresetOpen&&!currentSample(),"empty-slot DRAW opens creation settings without materializing a sample");
+            require(wavePresetOpen&&!currentSample(),"empty-slot NEW WAVE opens creation settings without materializing a sample");
             for(int step=0;step<12&&waveNewFocus!=7;++step)tap(Button::Down);
             require(waveNewFocus==7,"empty-slot creation reaches CREATE through the visible synthesis rows");
             tap(Button::A);

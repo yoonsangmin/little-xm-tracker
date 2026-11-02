@@ -20,11 +20,11 @@
 
             tap(Button::Left);tap(Button::Up);
             require(instrumentField==8,"Instrument NAME stays within the top row at its left and upper edges");
-            tap(Button::Right);require(instrumentField==9,"NAME moves right to LOAD XI");
+            tap(Button::Right);require(instrumentField==9,"NAME moves right to LOAD");
             tap(Button::Right);tap(Button::Right);
-            require(instrumentField==12,"LOAD XI moves right to KEY MAP without wrapping past it");
+            require(instrumentField==12,"LOAD moves right to KEY MAP without wrapping past it");
             tap(Button::Left);tap(Button::Down);
-            require(instrumentField==0,"LOAD XI enters the first right-pane parameter");
+            require(instrumentField==0,"LOAD enters the first right-pane parameter");
             tap(Button::Up);require(instrumentField==9,"Parameter row returns to the last top-row control");
             tap(Button::Left);tap(Button::Down);
             require(instrumentField==13&&sample==0,"NAME enters the owned sample list at the selected slot");
@@ -53,7 +53,7 @@
             require(mode==Mode::Name&&nameTarget==NameTarget::Instrument&&filename=="FIRST OWNER",
                     "The shared top NAME row edits the current instrument name");
             tap(Button::B);instrumentField=9;tap(Button::A);
-            require(mode==Mode::Browser&&fileAction==FileAction::ImportXi,"Top LOAD XI retains instrument import");
+            require(mode==Mode::Browser&&fileAction==FileAction::ImportXi,"Top LOAD retains XI instrument import");
             tap(Button::B);
 
             int outputWidth=0,outputHeight=0;SDL_GetRendererOutputSize(renderer,&outputWidth,&outputHeight);
@@ -84,7 +84,7 @@
             buttonInput(Button::B,true);tap(Button::Up);buttonInput(Button::B,false);
             instrumentField=12;tap(Button::A);keymapNote=49;drawLayout();
             renderedText({32,696,280,16},"1/16 USED",muted,panel);
-            renderedText({374,142,84,16},"C-4",amber,panel2);
+            renderedText({374,142,84,16},"C-4",ink,bg);
             renderedText({374,142+23*23,84,16},"B-5",ink,bg);
             screenshot(home/"instrument-layout-keymap.bmp");SDL_RenderPresent(renderer);
             require(io::encodeXm(doc)==layoutDocument&&!dirty&&undoStack.empty(),

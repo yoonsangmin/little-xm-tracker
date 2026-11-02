@@ -1,5 +1,5 @@
 // Included inside TrackerApp::Impl. FT2 editing tools use the app-owned model.
-    // DRAW: VALUE, EDIT POINTS, then NEW WAVE / CLEAR ALL / APPLY.
+    // DRAW: VALUE, EDIT POINTS, then CLEAR ALL / APPLY.
     int waveDrawFocus=0,waveDrawButton=2,waveDrawLengthIndex=1,waveNewFocus=0;
     int waveDrawInstrument=1, waveDrawSample=0;
     int waveDrawResolution=1,waveDrawPreset=0,waveDrawFirst=0,waveDrawLast=0;
@@ -298,8 +298,7 @@
         if(wavePresetOpen)refreshWavePreview();
     }
     void openWavePresets() {
-        // NEW WAVE owns only a creation candidate. Opening or cancelling it
-        // must not replace the PCM or cursor in an existing drawing draft.
+        // NEW WAVE owns only a creation candidate until CREATE opens DRAW.
         for(int n=0;n<5;++n) {
             const auto icon=makeWaveCandidate(n);
             wavePresetThumbnail(n,icon.pcm);
@@ -314,8 +313,8 @@
         stopWavePreview();
         wavePresetOpen=false;
         wavePresetDraftPcm=std::vector<std::int16_t>{};
-        waveDrawFocus=waveDrawButton=2;
-        if(!drawingSample)mode=Mode::Normal;
+        drawingSample.reset();
+        mode=Mode::Normal;
     }
     void moveWaveDrawFocus(int direction) {
         if(direction<0)waveDrawFocus=waveDrawFocus>=2?1:0;
@@ -369,7 +368,7 @@
         for(int n=0;n<5;++n)wavePresetThumbnail(n,makeWaveCandidate(n).pcm);
         prepareWavePreset(waveDrawPreset);
     }
-    void openWaveDraw() {
+    void openWaveDraw(bool create=false) {
         stopWavePreview();
         waveDrawInstrument=instrument;waveDrawSample=sample;waveDrawFocus=0;
         waveDrawResolution=1;waveDrawPreset=0;waveDrawLengthIndex=1;waveDrawButton=2;
@@ -377,8 +376,9 @@
         waveSynth={};waveNewRowColumns.fill(-1);
         wavePresetOpen=false;wavePresetDraftPcm=std::vector<std::int16_t>{};
         drawingSample.reset();waveDrawNew=false;
+        waveDrawFirst=waveDrawLast=drawFrame=0;
         mode=Mode::WaveDraw;
-        if(auto* pcm=currentSample();pcm&&!pcm->pcm.empty()) {
+        if(auto* pcm=currentSample();!create&&pcm&&!pcm->pcm.empty()) {
             Sample next=*pcm;drawingSample=std::move(next);
             const bool selected=selectionStart>=0&&selectionEnd>selectionStart&&selectionEnd<=int(pcm->pcm.size());
             waveDrawFirst=selected?selectionStart:0;waveDrawLast=selected?selectionEnd:int(pcm->pcm.size());
@@ -386,6 +386,7 @@
             drawFrame=waveDrawPointFrame(waveDrawPointIndex());
         } else openWavePresets();
     }
+    void openNewWave() {openWaveDraw(true);}
     void applyWaveDraft() {
         if(!drawingSample)return;
         stopWavePreview();
@@ -520,7 +521,7 @@
                     const int jump=held[std::size_t(Button::Select)]?(waveDrawResolution==4?64:std::max(1,waveDrawPointCount()/4)):1;
                     drawFrame=waveDrawPointFrame(std::clamp(waveDrawPointIndex()+sign*jump,0,waveDrawPointCount()-1));
                 } else if(vertical)moveWaveDrawFocus(b==Button::Down?1:-1);
-                else if(waveDrawFocus>=2)waveDrawButton=waveDrawFocus=std::clamp(waveDrawFocus+sign,2,4);
+                else if(waveDrawFocus>=2)waveDrawButton=waveDrawFocus=std::clamp(waveDrawFocus+sign,2,3);
             }
             return true;
         }
@@ -570,12 +571,11 @@
         if(mode==Mode::PasteMasks&&maskRow==6) {
             copyMask={};pasteMask={};
         } else if(mode==Mode::WaveDraw) {
-            if(waveDrawFocus==2)openWavePresets();
-            else if(waveDrawFocus==3&&drawingSample) {
+            if(waveDrawFocus==2&&drawingSample) {
                 std::fill(drawingSample->pcm.begin(),drawingSample->pcm.end(),0);
                 refreshWavePreview();
             }
-            else if(waveDrawFocus==4)applyWaveDraft();
+            else if(waveDrawFocus==3)applyWaveDraft();
         } else if(mode==Mode::EchoSettings&&echoField==4) {
             mutate([&]{edit::echoSample(*currentSampleChecked(),std::size_t(echoDelay),echoRepeats,echoDecay,echoTail);});
             mode=Mode::Normal;notify("ECHO APPLIED / UNDO AVAILABLE");
@@ -639,6 +639,7 @@
         const int buttonY=274+int(rows.size()-2)*44+12;
         drawToolPanel("NEW WAVE",buttonY+controlHeight,hints,detail);
         drawWavePreviewStatus();
+        const auto preview=playback->samplePreviewStatus();
         for(int n=0;n<5;++n) {
             const int x=100+n*167,y=146;
             const bool selected=n==waveDrawPreset,focused=n==waveNewFocus;
@@ -653,6 +654,12 @@
             auto py=[&](int point){return plotY+height/2-int(pcm[std::size_t(point)])*(height/2-2)/32768;};
             for(int point=1;point<count;++point)line(px(point-1),py(point-1),px(point),py(point),selected?cyan:muted);
             if(count==1)rect(plotX,py(0)-1,width,2,selected?cyan:muted);
+            if(selected&&wavePreview&&preview.active&&preview.instrument==0&&preview.sample==-1&&
+               preview.frame<wavePresetDraftPcm.size()) {
+                const int playX=plotX+int(preview.frame*std::size_t(width-1)/std::max(std::size_t{1},wavePresetDraftPcm.size()-1));
+                line(playX,plotY,playX,plotY+height-1,ink);
+                rect(playX-2,plotY+height-5,5,5,ink);
+            }
         }
         for(std::size_t r=1;r+1<rows.size();++r) {
             const int y=274+int(r-1)*44,width=rows[r].size()==1?824:404;
@@ -695,7 +702,7 @@
             if(!drawingSample)return;
             const auto hint=wavePreviewHint(waveDrawFocus==0?"LEFT/RIGHT POINT / A+DPAD EDIT / A+B ZERO / B CANCEL":
                 waveDrawFocus==1?"LEFT/RIGHT POINT / A+DPAD EDIT POINTS / B CANCEL":
-                waveDrawFocus==2?"A NEW WAVE / B CANCEL":waveDrawFocus==3?"A ZERO ENTIRE SAMPLE / B CANCEL":"A APPLY / B CANCEL");
+                waveDrawFocus==2?"A ZERO ENTIRE SAMPLE / B CANCEL":"A APPLY / B CANCEL");
             drawToolPanel("DRAW WAVEFORM",548+controlHeight,hint);const auto& pcm=drawingSample->pcm;
             drawWavePreviewStatus();
             const auto plot=waveDrawPlot();
@@ -716,15 +723,23 @@
                 const int frame=waveDrawPointFrame(point);rect(px(frame)-3,py(frame)-3,6,6,cyan);
             }
             line(px(drawFrame),plotY,px(drawFrame),plotY+plotHeight,amber);
+            const auto preview=playback->samplePreviewStatus();
+            // The preview owns the whole draft, while DRAW may show a selected
+            // range or a 64-frame window. Never pin an offscreen voice to an edge.
+            if(wavePreview&&preview.active&&preview.instrument==0&&preview.sample==-1&&
+               preview.frame>=std::size_t(first)&&preview.frame<std::size_t(last)) {
+                const int playX=px(int(preview.frame));
+                line(playX,plotY,playX,plotY+plotHeight-1,ink);
+                rect(playX-2,plotY+plotHeight-5,5,5,ink);
+            }
             rect(px(drawFrame)-4,py(drawFrame)-4,9,9,amber);
             txt(100,137,"POINT "+number(waveDrawPointIndex()+1)+" / "+number(waveDrawPointCount())+"   FRAME "+number(drawFrame),muted);
             const auto length=number(waveDrawLast-waveDrawFirst)+" FRAMES";
             txt(924-ui::textWidth(length),137,length,muted);
             labelValue(100,430,"VALUE",number(pcm[std::size_t(drawFrame)]),waveDrawFocus==0,824);
             labelValue(100,478,"EDIT POINTS",waveDrawResolution==4?"FRAME":number(waveDrawPointCount())+" / SMOOTH",waveDrawFocus==1,824);
-            drawButton(100,548,260,"NEW WAVE",waveDrawFocus==2);
-            drawButton(382,548,260,"CLEAR ALL",waveDrawFocus==3);
-            drawButton(664,548,260,"APPLY",waveDrawFocus==4);
+            drawButton(100,548,402,"CLEAR ALL",waveDrawFocus==2);
+            drawButton(522,548,402,"APPLY",waveDrawFocus==3);
             drawToolFooter(hint);
             return;
         }

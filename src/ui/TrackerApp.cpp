@@ -11,6 +11,7 @@
 #include "model/EditOperations.hpp"
 #include "model/Arrangement.hpp"
 #include "model/Cleanup.hpp"
+#include "model/Trim.hpp"
 #include "model/TrackerExtras.hpp"
 #include "model/SampleTools.hpp"
 #include "model/WaveSynth.hpp"
@@ -57,7 +58,7 @@ constexpr std::array<const char*,13> themeLabels{{"BACKGROUND","PANEL","HIGHLIGH
     "ACCENT","CURSOR","VOLUME / PLAY","WARNING / MUTE","PATTERN SELECTION","SAMPLE SELECTION","OVERLAY"}};
 enum class Page { Song, Pattern, Instrument, Sample };
 enum class Button { Up, Down, Left, Right, A, B, Start, Select, Count };
-enum class Mode { Normal, Menu, Browser, Name, Confirm, Help, Envelope, EnvelopePresets, Number, RenderSettings, Busy, Recording, ImportOptions, PasteMasks, WaveDraw, EchoSettings, PitchResult, ChopSettings, SlotList, ThemeColors, ThemeFiles };
+enum class Mode { Normal, Menu, Browser, Name, Confirm, Help, Envelope, EnvelopePresets, Number, RenderSettings, Busy, Recording, ImportOptions, PasteMasks, WaveDraw, EchoSettings, PitchResult, ChopSettings, SlotList, ThemeColors, ThemeFiles, TrimSettings };
 enum class NameTarget { File, Song, Instrument, Sample, Theme };
 enum class FileAction { OpenXm, SaveXm, ImportXi, ExportXi, ImportAudio, RenderWav, ExportWav, ExportWavRange };
 std::string hex(int value, int width = 2) {
@@ -128,12 +129,18 @@ struct TrackerApp::Impl {
     bool themeSaving=false, themeEditing=false;
     std::filesystem::path themeDirectory;
     std::vector<std::filesystem::path> themeFiles;
+    std::filesystem::path themeLoadPath, themeSavePath;
+    int themeLoadIndex=0, themeSaveIndex=0;
+    std::optional<std::array<SDL_Color,13>> themeFilePreview;
+    std::string themeFilePreviewError;
     Uint32 noticeUntil = 0, lastRecoveryAt = 0;
     std::uint64_t recoverySerial = 1, savedRecoverySerial = 0, pendingRecoverySerial = 0;
     std::future<void> recoveryWorker;
     std::optional<io::SourceFingerprint> sourceFingerprint;
     std::array<bool, static_cast<std::size_t>(Button::Count)> held{};
     std::array<Uint32, 4> repeatAt{};
+    std::array<Uint32, 4> directionPressedAt{};
+    Uint32 editPressedAt=0;
     int order = 0, row = 0, channel = 0, field = 0, instrument = 1, sample = 0;
     int selectedPattern = 0;
     int songOrderColumn = 0;
@@ -141,7 +148,7 @@ struct TrackerApp::Impl {
     std::optional<int> orderClipboard;
     int instrumentField = 0, sampleField = 0, songField = 0, keymapNote = 49;
     std::array<int,5> songRowFocus{{6,-1,-1,4,-1}};
-    std::array<int,5> sampleRowFocus{{-1,-1,-1,-1,-1}};
+    std::array<int,6> sampleRowFocus{{-1,-1,-1,-1,-1,-1}};
     int selectionStart = 0, selectionEnd = 0, solo = -1;
     std::uint64_t documentRevision=1,waveformRevision=0;
     int waveformInstrument=-1,waveformSample=-1;
@@ -525,6 +532,7 @@ struct TrackerApp::Impl {
     }
     void changePage(Page value) {
         cancelPendingNote();finishGesture();stopHeldAudition(true);
+        keymapSelected=false;keymapSelectStage=0;keymapSelectionOwner=0;
         if(held[std::size_t(Button::A)])aUsed=true;
         page = value; mode = Mode::Normal; stopWavePreview();
     }
@@ -572,8 +580,7 @@ struct TrackerApp::Impl {
         add("NEW EMPTY PATTERN", "CREATE A NEW BLANK PATTERN FOR THIS ORDER", [this]{createOrderPattern(false);});
         add("MOVE ORDER UP", "", [this]{moveSelectedOrder(-1);});
         add("MOVE ORDER DOWN", "", [this]{moveSelectedOrder(1);});
-        add("CLEAN UP PATTERNS", "REMOVE UNARRANGED PATTERNS / KEEP ALL INSTRUMENTS", [this]{cleanupSong(edit::CleanupScope::Patterns);});
-        add("CLEAN UP INSTRUMENTS", "REMOVE INSTRUMENTS UNUSED BY ANY PATTERN / KEEP PATTERNS", [this]{cleanupSong(edit::CleanupScope::Instruments);});
+        add("CLEAN UP SONG", "CHOOSE UNUSED DATA / LOOP TAILS / 8-BIT CONVERSION", [this]{openTrim();});
         add("TRIM SAMPLE TO SELECTION", "KEEP ONLY THE SELECTED FRAMES", [this]{trimSample();});
         add("NEW SONG", "EMPTY SONG / KEEP DEMO SAMPLE INSTRUMENTS", [this]{destructive([this]{newDocument();});});
         add("CONTROLS", "GAMEPAD SHORTCUTS FOR THIS SCREEN", [this]{mode=Mode::Help;});
@@ -725,6 +732,7 @@ struct TrackerApp::Impl {
 #include "ui/TrackerBrowserFolders.inc"
 #include "ui/TrackerArrangement.inc"
 #include "ui/TrackerImport.inc"
+#include "ui/TrackerTrim.inc"
 #include "ui/TrackerExtras.inc"
 #include "ui/TrackerAnalysis.inc"
 #include "ui/TrackerEnvelopePresets.inc"
@@ -755,7 +763,7 @@ struct TrackerApp::Impl {
         if(nextRow>=0)songRowFocus[std::size_t(nextRow)]=songField;
     }
     static constexpr std::array<std::array<int,4>,5> sampleFormRows{{
-        {9,10,11,-1},{0,1,-1,-1},{2,3,-1,-1},{5,6,7,8},{4,14,-1,-1}
+        {9,10,11,-1},{0,1,-1,-1},{2,3,-1,-1},{5,6,7,8},{4,12,14,-1}
     }};
     static int sampleFormRow(int value) {
         for(std::size_t r=0;r<sampleFormRows.size();++r)
@@ -764,7 +772,8 @@ struct TrackerApp::Impl {
     }
     void rememberSampleFocus() {
         const int group=sampleField>=9&&sampleField<=11?0:sampleField<=1?1:
-            sampleField<=3?2:sampleField==5||sampleField==6?3:sampleField==7||sampleField==8?4:-1;
+            sampleField<=3?2:sampleField==5||sampleField==6?3:sampleField==7||sampleField==8?4:
+            sampleField==12||sampleField==14?5:-1;
         if(group>=0)sampleRowFocus[std::size_t(group)]=sampleField;
     }
     void navigateSampleForm(Button b) {
@@ -778,8 +787,8 @@ struct TrackerApp::Impl {
                 case 1:sampleField=down?(sampleField==0?2:3):(sampleRowFocus[0]>=0?sampleRowFocus[0]:9);break;
                 case 2:if(!down)sampleField=sampleField==2?0:1;
                     else {const int group=sampleField==2?3:4;sampleField=sampleRowFocus[group]>=0?sampleRowFocus[group]:group==3?5:7;}break;
-                case 3:sampleField=down?(sampleField<=6?4:14):(sampleField<=6?2:3);break;
-                case 4:if(!down){const int group=sampleField==4?3:4;sampleField=sampleRowFocus[group]>=0?sampleRowFocus[group]:group==3?5:7;}break;
+                case 3:sampleField=down?(sampleField<=6?4:sampleRowFocus[5]>=0?sampleRowFocus[5]:sampleField==7?12:14):(sampleField<=6?2:3);break;
+                case 4:if(!down){const int group=sampleField==4?3:4;sampleField=sampleRowFocus[group]>=0?sampleRowFocus[group]:sampleField==4?5:sampleField==12?7:8;}break;
             }
         } else {
             const auto& fields=sampleFormRows[std::size_t(currentRow)];
@@ -876,16 +885,19 @@ struct TrackerApp::Impl {
                     beginGesture();s=&editableSample();
                 }
                 int delta=sign*(vertical?16:1);
-                int frameDelta=sign*(vertical?std::max(1,int(s->pcm.size()/100)):1);
                 const int length=int(s->pcm.size());
+                const Uint32 now=SDL_GetTicks();
+                const Uint32 heldMs=std::min(now-editPressedAt,now-directionPressedAt[std::size_t(b)]);
+                const int frameDelta=sign*sampleRangeStep(length,vertical,heldMs);
                 if(sampleField>=4&&!length)return;
+                const auto movedFrame=[&](int value,int low,int high){return int(std::clamp<std::int64_t>(std::int64_t(value)+frameDelta,low,high));};
                 if(sampleField==7||sampleField==8){
                     const bool selected=selectionEnd>selectionStart;
                     selectionStart=std::clamp(selectionStart,0,length-1);
                     if(sampleField==7){
-                        selectionStart=std::clamp(selectionStart+frameDelta,0,selected?selectionEnd-1:length-1);
+                        selectionStart=movedFrame(selectionStart,0,selected?selectionEnd-1:length-1);
                         if(!selected)selectionEnd=selectionStart+1;
-                    } else selectionEnd=std::clamp(selectionEnd+frameDelta,selectionStart+1,length);
+                    } else selectionEnd=movedFrame(selectionEnd,selectionStart+1,length);
                     rememberSampleFocus();return;
                 }
                 beginGesture();
@@ -910,11 +922,11 @@ struct TrackerApp::Impl {
                     // them until edited, then normalize before signed arithmetic.
                     int first=int(std::min(s->loopStart,std::uint32_t(length-1)));
                     int end=int(std::clamp(std::uint64_t(s->loopStart)+s->loopLength,
-                        std::uint64_t(first)+1,std::uint64_t(length)));
+                        std::uint64_t(first),std::uint64_t(length)));
                     if(sampleField==5){
-                        first=std::clamp(first+frameDelta,0,hasLoop?end-1:length-1);
+                        first=movedFrame(first,0,hasLoop?end-1:length-1);
                         if(!hasLoop)end=first+1;
-                    } else end=std::clamp(end+frameDelta,first+1,length);
+                    } else end=movedFrame(end,first+1,length);
                     s->loopStart=std::uint32_t(first);s->loopLength=std::uint32_t(end-first);
                     rememberSampleFocus();
                 }
@@ -940,8 +952,8 @@ struct TrackerApp::Impl {
         // Show a new note immediately, but let an A-first chord replace that
         // provisional insertion without leaving an extra edit or undo entry.
         if(b!=Button::A)cancelPendingNote();
-        if(!repeating){held[std::size_t(b)]=true;if(int(b)<4)repeatAt[int(b)]=SDL_GetTicks()+Uint32(repeatDelay);}
-        if(b==Button::A&&!repeating){aUsed=false;aPreviewBlocked=false;}
+        if(!repeating){held[std::size_t(b)]=true;if(int(b)<4){directionPressedAt[int(b)]=SDL_GetTicks();repeatAt[int(b)]=directionPressedAt[int(b)]+Uint32(repeatDelay);}}
+        if(b==Button::A&&!repeating){aUsed=false;aPreviewBlocked=false;editPressedAt=SDL_GetTicks();}
         if(b==Button::B||b==Button::Select||b==Button::Start)stopHeldAudition(true);
         if(b==Button::Start&&held[std::size_t(Button::A)])aUsed=true;
         if(b==Button::B&&!repeating){
@@ -970,7 +982,7 @@ struct TrackerApp::Impl {
                 playback->stop();followPlayback=false;return;
             }
         }
-        if(themeButton(b)||slotListButton(b)||importAudioButton(b,repeating)||analysisButton(b,repeating)||extrasButton(b,repeating)||toolButton(b,repeating))return;
+        if(trimButton(b)||themeButton(b)||slotListButton(b)||importAudioButton(b,repeating)||analysisButton(b,repeating)||extrasButton(b,repeating)||toolButton(b,repeating))return;
         if(mode==Mode::Confirm){
             if(b==Button::A&&!repeating){aUsed=true;mode=Mode::Normal;auto fn=std::move(confirmed);if(fn)fn();}
             else if(b==Button::B){mode=confirmCancelMode;confirmed={};}
@@ -1016,7 +1028,7 @@ struct TrackerApp::Impl {
         if(held[std::size_t(Button::Select)]){
             if(b!=Button::Select)selectUsed=true;
             if(b==Button::A||(b==Button::Select&&held[std::size_t(Button::A)])){
-                aUsed=true;selectUsed=true;if(!repeating)pasteCurrent();
+                aUsed=true;selectUsed=true;if(!repeating&&page!=Page::Sample)pasteCurrent();
             }else if(b==Button::B||(b==Button::Select&&held[std::size_t(Button::B)])){
                 bUsed=true;selectUsed=true;if(!repeating)markSelection();
             }else if(b==Button::Left||b==Button::Right){
@@ -1071,13 +1083,14 @@ struct TrackerApp::Impl {
             if(mode==Mode::Normal&&!bUsed){
                 playback->stopPreview();
                 if(hasSelection())copyCurrent();
+                else if(page==Page::Instrument&&instrumentMapView)toggleInstrumentMap();
                 else resumePatternFollow();
             }
             return;
         }
         if(b!=Button::A)return;
         finishGesture();
-        if(themeRelease(b)||importAudioRelease(b)||toolRelease(b))return;
+        if(trimRelease(b)||themeRelease(b)||importAudioRelease(b)||toolRelease(b))return;
         if(mode==Mode::Menu){
             if(!aUsed&&!actions.at(menuIndex).adjust){aUsed=true;auto fn=actions.at(menuIndex).run;mode=Mode::Normal;if(fn)fn();}
             return;
@@ -1185,13 +1198,17 @@ struct TrackerApp::Impl {
     }
 #include "ui/TrackerViews.inc"
 
-    void envelope(int x,int y,int width,int height,const Envelope& e) {
+    void envelope(int x,int y,int width,int height,const Envelope& e,int playbackTick=-1) {
         rect(x,y,width,height,bg);line(x,y+height-1,x+width,y+height-1,dim);
         if(!e.count){txt(x+12,y+height/2-7,"NO ENVELOPE",dim);return;}
         const int maxX=std::max(1,int(e.points[e.count-1].x));
         for(int i=0;i<e.count;++i){int px=x+int(e.points[i].x)*(width-8)/maxX,py=y+height-6-int(e.points[i].y)*(height-10)/64;
             if(i){int ax=x+int(e.points[i-1].x)*(width-8)/maxX,ay=y+height-6-int(e.points[i-1].y)*(height-10)/64;line(ax,ay,px,py,cyan);}
             rect(px-2,py-2,5,5,i==e.sustain?amber:cyan);
+        }
+        if((e.flags&1)&&playbackTick>=0) {
+            const int px=x+std::clamp(playbackTick,0,int(e.points[e.count-1].x))*(width-8)/maxX;
+            line(px,y,px,y+height-1,ink);rect(px-2,y+height-5,5,5,ink);
         }
     }
     void drawSample() {
@@ -1201,7 +1218,7 @@ struct TrackerApp::Impl {
         txt(34,52+controlTextY,"NAME",sampleField==9?amber:muted);
         txt(112,52+controlTextY,s?ui::fit(text::xmDisplayText(s->name),52):"EMPTY SAMPLE",sampleField==9?amber:ink);
         drawButton(760,52,118,"LOAD",sampleField==10);
-        drawButton(886,52,118,"DRAW",sampleField==11);
+        drawButton(886,52,118,"NEW WAVE",sampleField==11);
         Sample empty;if(!s)s=&empty;
         const int x=30,y=103,ww=964,hh=284;rect(20,96,984,302,panel);
         line(x,y+hh/2,x+ww,y+hh/2,dim);
@@ -1230,7 +1247,7 @@ struct TrackerApp::Impl {
                 }
             }
             const bool loopFocus=sampleField>=4&&sampleField<=6;
-            const bool selectionFocus=sampleField==7||sampleField==8||sampleField==14;
+            const bool selectionFocus=sampleField==7||sampleField==8||sampleField==12||sampleField==14;
             auto markers=[&](std::size_t first,std::size_t last,bool focused,int firstField,int lastField){
                 const std::array<std::size_t,2> frames{{first,last}};
                 const std::array<int,2> fields{{firstField,lastField}};
@@ -1276,7 +1293,8 @@ struct TrackerApp::Impl {
         rangeField(32,644,463,"TYPE",loopNames[std::min<int>(2,s->loopType)],4);
         rangeField(529,590,225,"START",number(selectionStart),7);
         rangeField(766,590,226,"END",number(selectionEnd),8);
-        drawButton(529,644,463,"PROCESS",sampleField==14);
+        drawButton(529,644,225,"DRAW",sampleField==12);
+        drawButton(766,644,226,"PROCESS",sampleField==14);
     }
     void overlay() {SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_BLEND);rect(0,0,W,H,overlayColor);SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_NONE);}
     void drawMenu() {
@@ -1373,9 +1391,18 @@ struct TrackerApp::Impl {
             rows.push_back("MONITOR: DPAD         CHANNEL; UP AT TOP: RETURN");
         } else if(page==Page::Instrument) {
             rows[7]="START                 LISTEN / STOP";
-            rows[5]="ACTIONS > INSTRUMENT MANAGEMENT";
-            rows[6]="COPY / PASTE INSTRUMENT (WHOLE SLOT)";
-            rows.push_back("B+UP/DOWN             INSTRUMENT NUMBER");
+            if(instrumentMapView) {
+                rows[5]="HOLD SELECT, TAP B    RANGE / PAGE / ALL / CANCEL";
+                rows[6]="B ON SELECTION        COPY MAP; SELECT+A: PASTE";
+                rows.push_back("KEY MAP: B+UP/DOWN    MOVE 24 NOTES / EXTEND SELECTION");
+                rows.push_back("TAP B, NO SELECTION   RETURN TO INSTRUMENT SETTINGS");
+                rows.push_back("KEY MAP: A+DPAD       EDIT CURRENT / SELECTED MAPPINGS");
+                rows.push_back("KEY MAP: A+B          CUT MAPPINGS / RESET TO SAMPLE 00");
+            } else {
+                rows[5]="ACTIONS > INSTRUMENT MANAGEMENT";
+                rows[6]="COPY / PASTE INSTRUMENT (WHOLE SLOT)";
+                rows.push_back("B+UP/DOWN             INSTRUMENT NUMBER");
+            }
             rows.push_back("B+LEFT/RIGHT          SAMPLE SLOT");
             rows.push_back("A ON NAME / LOAD      RENAME / IMPORT XI");
             rows.push_back("A ON ENVELOPE         OPEN ENVELOPE EDITOR");
@@ -1383,12 +1410,16 @@ struct TrackerApp::Impl {
             rows.push_back("SAMPLE LIST: A OPEN / A+B DELETE SLOT");
         } else {
             rows[7]="START                 LISTEN TO SAMPLE / SELECTION; STOP";
+            rows[2]="A+B                   ZERO CURRENT VALUE / ENDPOINT";
+            rows[6]="B ON SELECTION        COPY PCM; PROCESS: PASTE PCM";
             rows.push_back("B+UP/DOWN             SAMPLE SLOT");
             rows.push_back("B+LEFT/RIGHT          OWNER INSTRUMENT");
             rows[5]="HOLD SELECT, TAP B    SELECT / EXPAND / CANCEL PCM";
             rows.push_back("A ON PROCESS          PROCESS SELECTED PCM");
             rows.push_back("A ON DRAW             OPEN DRAW");
             rows.push_back("PCM RANGE: DPAD FOCUS / A+DPAD EDIT START OR END");
+            rows.push_back("A+LEFT/RIGHT: FINE / A+UP/DOWN: COARSE / HOLD: FASTER");
+            rows.push_back("PROCESS > CUT PCM    CUT THE SELECTED AUDIO");
         }
         if(page==Page::Pattern||page==Page::Song) {
             rows.push_back("HOLD B, TAP SELECT    MUTE / UNMUTE CHANNEL");
@@ -1415,6 +1446,7 @@ struct TrackerApp::Impl {
         drawExtrasModes();
         drawAnalysisModes();
         if(mode==Mode::ImportOptions)drawAudioImport();
+        if(mode==Mode::TrimSettings)drawTrim();
         if(mode==Mode::ThemeColors)drawThemeColors();
         if(mode==Mode::ThemeFiles)drawThemeFiles();
         drawNotice();
@@ -1479,6 +1511,11 @@ struct TrackerApp::Impl {
         auto optionChord=[&](Button code){buttonInput(Button::B,true);tap(code);buttonInput(Button::B,false);};
         auto menu=[&](const std::string& label){
             try {
+            // Older scenario names exercise the same individual operations
+            // through the unified cleanup dialog, without shipping aliases.
+            const int cleanupOption=label=="CLEAN UP PATTERNS"?0:label=="CLEAN UP INSTRUMENTS"?1:label=="MINIMISE ALL INSTRUMENTS"?4:-1;
+            const std::string actionLabel=cleanupOption>=0?"CLEAN UP SONG":label;
+            if(mode==Mode::TrimSettings){tap(Button::B);while(mode==Mode::Menu)tap(Button::B);}
             // Follow the real context menus. Basic actions now live directly
             // on their screens or use the four edit buttons.
             if(label=="SONG"){navigatePage(Page::Song);return;}
@@ -1492,13 +1529,12 @@ struct TrackerApp::Impl {
                 changePage(Page::Instrument);instrumentField=label=="RENAME INSTRUMENT"?8:label=="IMPORT XI"?9:label=="VOLUME ENVELOPE"?10:11;tap(Button::A);return;
             }
             if(label=="IMPORT AUDIO"||label=="DRAW WAVEFORM"||label=="RENAME SAMPLE"){
-                changePage(Page::Sample);sampleField=label=="IMPORT AUDIO"?10:label=="DRAW WAVEFORM"?11:9;tap(Button::A);return;
+                changePage(Page::Sample);sampleField=label=="IMPORT AUDIO"?10:label=="DRAW WAVEFORM"?12:9;tap(Button::A);return;
             }
             if(label=="COPY PCM"){changePage(Page::Sample);selectChord(Button::B);tap(Button::B);return;}
-            if(label=="CUT PCM"){changePage(Page::Sample);buttonInput(Button::A,true);tap(Button::B);buttonInput(Button::A,false);return;}
-            if(label=="PASTE PCM"){changePage(Page::Sample);selectChord(Button::A);return;}
+            if(label=="PASTE PCM")changePage(Page::Sample);
             if(label=="CANCEL BLOCK SELECTION"){while(blockSelected)selectChord(Button::B);return;}
-            if(label=="RENDER WAV"||label=="CLEAN UP PATTERNS"||label=="CLEAN UP INSTRUMENTS"||label=="MINIMISE ALL INSTRUMENTS"||label=="INSERT ORDER"||label=="DUPLICATE PATTERN"||label=="NEW EMPTY PATTERN"||label=="MOVE ORDER UP"||label=="MOVE ORDER DOWN")changePage(Page::Song);
+            if(label=="RENDER WAV"||actionLabel=="CLEAN UP SONG"||label=="INSERT ORDER"||label=="DUPLICATE PATTERN"||label=="NEW EMPTY PATTERN"||label=="MOVE ORDER UP"||label=="MOVE ORDER DOWN")changePage(Page::Song);
             if(label=="SWAP INSTRUMENT"||label=="MINIMISE INSTRUMENT")changePage(Page::Instrument);
             if(label=="MINIMISE SAMPLE")changePage(Page::Sample);
             if(page==Page::Sample&&hasSelection()) {
@@ -1513,7 +1549,7 @@ struct TrackerApp::Impl {
             // searching for an unrelated instrument action on an empty slot.
             const std::vector<std::string> groups={"ORDER MANAGEMENT","PROJECT","PATTERN TOOLS","ROWS","TRANSPOSE","INSTRUMENT MANAGEMENT","KEY MAP RANGE","SAMPLE MANAGEMENT","PCM PROCESSING","AMPLITUDE","ADVANCED PCM"};
             std::function<bool()> findAction=[&]{
-                const auto item=std::find_if(actions.begin(),actions.end(),[&](const Action& a){return a.label==label;});
+                const auto item=std::find_if(actions.begin(),actions.end(),[&](const Action& a){return a.label==actionLabel;});
                 if(item!=actions.end()){
                     const int target=int(std::distance(actions.begin(),item));
                     while(menuIndex<target)tap(Button::Down);
@@ -1540,6 +1576,16 @@ struct TrackerApp::Impl {
                 tap(Button::Select);found=findAction();
             }
             require(found,"requested context action exists");
+            if(cleanupOption>=0){
+                require(mode==Mode::TrimSettings,"individual cleanup enters the unified options");
+                for(int n=0;n<6;++n){
+                    while(trimField<n)tap(Button::Down);
+                    while(trimField>n)tap(Button::Up);
+                    chord({n==cleanupOption?Button::Right:Button::Left});
+                }
+                tap(Button::Down);tap(Button::A);
+                if(mode==Mode::TrimSettings){tap(Button::B);while(mode==Mode::Menu)tap(Button::B);}
+            }
             } catch(const std::exception& error) {
                 throw std::runtime_error("UI ACTION "+label+" / INSTRUMENT "+number(instrument)+
                     " / SAMPLE "+number(sample)+": "+error.what());
@@ -1677,6 +1723,7 @@ struct TrackerApp::Impl {
 #include "../../tests/arrangement_ui_checks.inc"
 #include "../../tests/pattern_view_ui_checks.inc"
 #include "../../tests/import_cleanup_ui_checks.inc"
+#include "../../tests/trim_ui_checks.inc"
 #include "../../tests/ft2_extras_ui_checks.inc"
 #include "../../tests/eight_button_ui_checks.inc"
 #include "../../tests/lazy_slots_ui_checks.inc"
@@ -1686,6 +1733,8 @@ struct TrackerApp::Impl {
 #include "../../tests/theme_ui_checks.inc"
 #include "../../tests/theme_files_ui_checks.inc"
 #include "../../tests/note_audition_ui_checks.inc"
+#include "../../tests/envelope_playhead_ui_checks.inc"
+#include "../../tests/song_time_ui_checks.inc"
 #include "../../tests/sample_analysis_ui_checks.inc"
 #include "../../tests/envelope_presets_ui_checks.inc"
 #include "../../tests/minimise_ui_checks.inc"
@@ -1696,6 +1745,7 @@ struct TrackerApp::Impl {
 #include "../../tests/main_navigation_ui_checks.inc"
 #include "../../tests/sample_layout_ui_checks.inc"
 #include "../../tests/instrument_layout_ui_checks.inc"
+#include "../../tests/keymap_edit_ui_checks.inc"
 #include "../../tests/brick_feedback_ui_checks.inc"
 #include "../../tests/waveform_view_ui_checks.inc"
 #include "../../tests/wave_preview_ui_checks.inc"
