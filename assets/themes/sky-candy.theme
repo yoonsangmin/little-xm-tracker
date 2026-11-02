@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Sky Candy
+background #EAF2F8
+panel #DCE8F2
+highlight #C9DCEB
+text #324F6B
+secondary_text #63778D
+dim_text #9CACBD
+accent #7B4671
+cursor #406486
+volume #42705F
+warning #AA4D68
+selection #C6D3E8
+sample_selection #D7CBDF
+overlay #243344

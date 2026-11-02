@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# LCD Lilac
+background #D1CED8
+panel #C4C0CE
+highlight #B6B2C2
+text #3D3849
+secondary_text #6C647C
+dim_text #9D95AC
+accent #3D3849
+cursor #4B435B
+volume #554B65
+warning #4B435B
+selection #A99FB9
+sample_selection #B3A9C3
+overlay #2C2736

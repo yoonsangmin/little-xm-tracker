@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# LCD Blue
+background #CAD7DA
+panel #BECED1
+highlight #AFBFC4
+text #293E47
+secondary_text #526870
+dim_text #8E9FA5
+accent #2B414A
+cursor #344E59
+volume #3B535C
+warning #324953
+selection #9FB5BD
+sample_selection #AABFC5
+overlay #263C44

@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Game Boy
+background #B0BF7B
+panel #A1B16D
+highlight #93A25F
+text #24351F
+secondary_text #435334
+dim_text #7C8D52
+accent #24351F
+cursor #2E4427
+volume #344B2B
+warning #2E4427
+selection #83964E
+sample_selection #8FA15B
+overlay #24351F

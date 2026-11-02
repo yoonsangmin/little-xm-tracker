@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# LCD Sage
+background #CDD6C1
+panel #BDC9B0
+highlight #ACB99D
+text #34412E
+secondary_text #5E6D52
+dim_text #8F9E82
+accent #34412E
+cursor #3F5038
+volume #41513A
+warning #3F5038
+selection #99AC8D
+sample_selection #AAB99D
+overlay #2E3A29

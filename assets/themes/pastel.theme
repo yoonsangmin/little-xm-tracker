@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Pastel
+background #F4EEF7
+panel #E9E4F0
+highlight #DCD3E8
+text #51415D
+secondary_text #75657F
+dim_text #AAA0B8
+accent #30567F
+cursor #934769
+volume #3F725D
+warning #AA4B63
+selection #D9CCE5
+sample_selection #D3DFE9
+overlay #292334

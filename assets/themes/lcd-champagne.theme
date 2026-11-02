@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# LCD Champagne
+background #D8D0B5
+panel #CBC2A3
+highlight #BDB38E
+text #423D2B
+secondary_text #73694C
+dim_text #A19672
+accent #423D2B
+cursor #51482F
+volume #574F34
+warning #51482F
+selection #B2A67D
+sample_selection #BDB18C
+overlay #373320

@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# LCD Silver
+background #D0D3CB
+panel #C3C7BD
+highlight #B4BBB0
+text #303A32
+secondary_text #5B655A
+dim_text #929B8E
+accent #303A32
+cursor #35443B
+volume #4A594A
+warning #35443B
+selection #A1ADA0
+sample_selection #ADB8A8
+overlay #273129

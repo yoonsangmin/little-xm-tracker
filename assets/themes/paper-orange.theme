@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Paper Orange
+background #F1EFE9
+panel #E4E1D8
+highlight #D6D3C9
+text #111111
+secondary_text #6F6B63
+dim_text #A49F94
+accent #111111
+cursor #BB4208
+volume #111111
+warning #BB4208
+selection #E8C5AD
+sample_selection #D6D3C9
+overlay #111111

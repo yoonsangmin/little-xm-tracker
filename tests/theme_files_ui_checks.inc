@@ -71,8 +71,11 @@
             require(themeDirectory==contentDirectory/"themes","theme files use the fixed themes folder beside the portable content");
             for(const char* name:{"default.theme","midnight.theme","amber.theme","mono.theme",
                     "ocean.theme","forest.theme","phosphor.theme","cobalt.theme","arcade.theme","ember.theme",
-                    "ice.theme","lavender.theme","rose.theme","copper.theme","sand.theme","paper.theme"})
-                require(io::decodeTheme(io::readFile(themeDirectory/name)).size()==palette.size(),"all 16 shipped presets are available as valid theme files");
+                    "ice.theme","lavender.theme","rose.theme","copper.theme","sand.theme","paper.theme",
+                    "paper-orange.theme","ink-orange.theme","gameboy.theme","pocket.theme","lcd-blue.theme",
+                    "lcd-silver.theme","lcd-champagne.theme","lcd-sage.theme","lcd-lilac.theme",
+                    "pastel.theme","pink-sky.theme","sky-candy.theme"})
+                require(io::decodeTheme(io::readFile(themeDirectory/name)).size()==palette.size(),"all 28 shipped presets are available as valid theme files");
             const auto token=number(std::chrono::high_resolution_clock::now().time_since_epoch().count());
             const auto sharedPath=themeDirectory/("qa-shared-"+token+".THEME");
             auto shared=io::defaultTheme;shared[0]=0x22152d;shared[6]=0xe9a5ff;

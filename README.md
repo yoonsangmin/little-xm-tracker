@@ -22,7 +22,7 @@ The [manual file](docs/manual.html) is also included in the release and can be o
 - Editing during playback, selection loops, channel Mute/Solo and Undo/Redo.
 - Two recovery slots and a backup before manual overwrites. Unused patterns and instruments can be cleaned up separately.
 - Name display for Korean, Japanese, Chinese and basic European characters. Name entry uses English letters and numbers.
-- Custom RGB themes with load/save/share support and 16 bundled presets.
+- Custom RGB themes with load/save/share support and 28 bundled presets.
 
 ## Install on Brick
 
@@ -53,7 +53,7 @@ See the included `INSTALL.txt` for installation and troubleshooting details.
 | `songs/` | XM songs and rendered song WAVs |
 | `instruments/` | XI instruments |
 | `samples/` | Sample audio |
-| `themes/` | Shared `.theme` files and editable copies of the 16 presets |
+| `themes/` | Shared `.theme` files and editable copies of the 28 presets |
 | `userdata/` | Settings and recovery files |
 
 To update, copy the whole new distribution over the existing installation, **merging folders and overwriting matching application files**. Do not delete or replace the existing `xm-tracker/` folder first. The ZIP contains only empty user folders and no root `gamecontrollerdb.txt`, so your songs, themes, settings and controller mapping stay in place.

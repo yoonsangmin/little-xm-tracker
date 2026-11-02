@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Ink Orange
+background #000000
+panel #101010
+highlight #222222
+text #F1EFE9
+secondary_text #9A968C
+dim_text #56534D
+accent #F1EFE9
+cursor #FF6A1F
+volume #F1EFE9
+warning #FF6A1F
+selection #3F2C21
+sample_selection #282622
+overlay #000000

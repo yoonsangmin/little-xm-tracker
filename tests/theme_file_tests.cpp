@@ -111,14 +111,15 @@ double contrast(std::uint32_t a, std::uint32_t b) {
     return (std::max(first, second) + 0.05) / (std::min(first, second) + 0.05);
 }
 void bundledThemes(const std::filesystem::path& folder) {
-    std::array<Theme, 16> themes{};
-    const std::array<const char*, 16> names{{"default", "midnight", "amber", "mono",
+    std::array<Theme, 28> themes{};
+    const std::array<const char*, 28> names{{"default", "midnight", "amber", "mono",
         "ocean", "forest", "phosphor", "cobalt", "arcade", "ember", "ice", "lavender",
-        "rose", "copper", "sand", "paper"}};
+        "rose", "copper", "sand", "paper", "paper-orange", "ink-orange", "gameboy", "pocket", "lcd-blue",
+        "lcd-silver", "lcd-champagne", "lcd-sage", "lcd-lilac", "pastel", "pink-sky", "sky-candy"}};
     std::size_t themeCount = 0;
     for (const auto& entry : std::filesystem::directory_iterator(folder))
         if (entry.is_regular_file() && entry.path().extension() == ".theme") ++themeCount;
-    require(themeCount == names.size(), "Bundled theme count differs from the expected 16 presets");
+    require(themeCount == names.size(), "Bundled theme count differs from the expected 28 presets");
     for (std::size_t n = 0; n < names.size(); ++n) {
         std::ifstream file(folder / (std::string(names[n]) + ".theme"), std::ios::binary);
         require(bool(file), "Bundled theme is missing");
@@ -145,7 +146,7 @@ int main(int argc, char** argv) {
         textCompatibility();
         malformedFiles();
         bundledThemes(argv[1]);
-        std::cout << "Theme RGB round trips, parsing, rejection and 16 bundled presets passed\n";
+        std::cout << "Theme RGB round trips, parsing, rejection and 28 bundled presets passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

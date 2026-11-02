@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Pink Sky
+background #F7E9ED
+panel #EDD9E2
+highlight #E0C8D8
+text #543B53
+secondary_text #806578
+dim_text #B59AA9
+accent #2E5B79
+cursor #A44272
+volume #4D6B56
+warning #A7474E
+selection #D9BBD0
+sample_selection #CEDDE6
+overlay #322536

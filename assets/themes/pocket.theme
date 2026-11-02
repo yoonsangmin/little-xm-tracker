@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Pocket
+background #C7CBC0
+panel #B8BEB1
+highlight #A8B19F
+text #272F29
+secondary_text #515D50
+dim_text #8B9687
+accent #27342C
+cursor #314336
+volume #3D4B40
+warning #293A30
+selection #98A38F
+sample_selection #A1AD98
+overlay #252D26
