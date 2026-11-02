@@ -1,6 +1,6 @@
 <p><img src="docs/images/logo.svg" alt="Little XM Tracker" width="520"></p>
 
-# Little XM Tracker 0.8.0
+# Little XM Tracker 0.9.0
 
 An open-source XM tracker for composing with a gamepad on TrimUI Brick / KNULLI.
 Inspired by the controls of LSDj, M8 and ChooChooTracker, it uses FastTracker II's `.xm` format as its working file.
