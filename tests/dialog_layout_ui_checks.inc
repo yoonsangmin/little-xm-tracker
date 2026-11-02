@@ -27,7 +27,7 @@
                 openBrowser(FileAction::SaveXm);
                 dialogShot("dialog-save.bmp",{40,48,944,666});tap(Button::B);
                 menu("SETTINGS");
-                dialogShot("dialog-settings.bmp",{129,77,766,452});
+                dialogShot("dialog-settings.bmp",{129,77,766,486});
                 openThemeColors();dialogShot("dialog-theme.bmp",{60,80,904,553});
                 openThemeFiles(false);dialogShot("dialog-theme-files.bmp",{85,77,854,588});
                 tap(Button::B);tap(Button::B);tap(Button::B);tap(Button::B);
@@ -74,6 +74,6 @@
                 mode=Mode::Busy;busyTitle="WAV RENDER";
                 dialogShot("dialog-busy.bmp");mode=Mode::Normal;
                 page=Page::Pattern;mode=Mode::Help;
-                dialogShot("dialog-controls.bmp",{75,70,874,559});tap(Button::B);
+                dialogShot("dialog-controls.bmp",{75,70,874,586});tap(Button::B);
                 held.fill(false);mode=Mode::Normal;menuParents.clear();
             }

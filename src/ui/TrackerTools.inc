@@ -416,7 +416,7 @@
         drawDialogFooter(toolDialogBounds,hints,detail);
     }
     void drawEnvelopeEditor() {
-        const char* hints="A+DPAD EDIT / A+B CUT / SELECT+A PASTE / B BACK / SELECT+LEFT/RIGHT VOLUME/PAN / A HOLD LISTEN";
+        const char* hints="A+DPAD EDIT / A+B CUT / SELECT+A PASTE / B BACK / SELECT+LEFT/RIGHT VOLUME/PAN / HOLD A LISTEN / RELEASE A STOP";
         drawToolPanel(envelopePan?"PANNING ENVELOPE":"VOLUME ENVELOPE",584+controlHeight,hints);const auto& e=currentEnvelope();
         envelope(85,150,530,220,e);
         if(e.count){const int maxX=std::max(1,int(e.points[e.count-1].x));const auto& p=e.points[std::size_t(envelopePoint)];outline(85+int(p.x)*522/maxX-5,150+214-int(p.y)*210/64-5,11,11,amber);}
@@ -443,7 +443,7 @@
             drawToolFooter(hints);
         }
         if(mode==Mode::RenderSettings){
-            const char* hints=renderField==6?"A CHOOSE FILE / B CANCEL":"A+DPAD VALUE / B CANCEL";
+            const char* hints=renderField==6?"A CHOOSE FILE / B CANCEL":"A+DPAD EDIT / B CANCEL";
             drawToolPanel("WAV RENDER SETTINGS",527+controlHeight,hints);
             const bool range=renderOptions.lastOrder>=0;
             const std::array<std::string,7> labels={"SCOPE","FIRST ORDER","LAST ORDER (INCLUDED)","MAX DURATION (SECONDS)","TAIL SECONDS","TOTAL PASSES","CHOOSE FILE"};
@@ -465,7 +465,7 @@
         }
         if(mode==Mode::Recording) {
             const char* hints=(captureStarted||pendingRecording)?"A FINISH AND REVIEW / B DISCARD":
-                captureField==2?"A RECORD / B BACK":"A+DPAD VALUE / B BACK";
+                captureField==2?"A RECORD / B BACK":"A+DPAD EDIT / B BACK";
             drawToolPanel("MICROPHONE RECORDING",509,hints);
             labelValue(100,175,"DEVICE",captureDevices.empty()?"NONE":
                 ui::fit(captureDevices[std::size_t(captureDevice)].name,43),captureField==0,824);

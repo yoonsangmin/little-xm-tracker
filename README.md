@@ -22,7 +22,7 @@ The [manual file](docs/manual.html) is also included in the release and can be o
 - Editing during playback, selection loops, channel Mute/Solo and Undo/Redo.
 - Two recovery slots and a backup before manual overwrites. Unused patterns and instruments can be cleaned up separately.
 - Name display for Korean, Japanese, Chinese and basic European characters. Name entry uses English letters and numbers.
-- Custom RGB themes with load/save/share support and Default, Midnight, Amber and Mono presets.
+- Custom RGB themes with load/save/share support and 16 bundled presets.
 
 ## Install on Brick
 
@@ -33,16 +33,18 @@ roms/ports/
   Little XM Tracker.sh
   xm-tracker/
     littlexm-tracker
-    gamecontrollerdb.txt
-    assets/
+    assets/gamecontrollerdb.txt
+    assets/themes/
+    assets/fonts/
     docs/manual.html
     songs/
     instruments/
     samples/
     themes/
+    userdata/
 ```
 
-Refresh the game list and launch **Ports → Little XM Tracker**.
+Refresh the game list and launch **Ports → Little XM Tracker**. The five user folders are included empty. On launch, the app creates `userdata/` and `themes/` if needed and copies missing theme presets and the editable `gamecontrollerdb.txt` from `assets/`; existing files are kept. Song, instrument and sample folders are not recreated if removed.
 PortMaster is not required. This package is for KNULLI; Stock and NextUI packages are not provided.
 See the included `INSTALL.txt` for installation and troubleshooting details.
 
@@ -51,10 +53,10 @@ See the included `INSTALL.txt` for installation and troubleshooting details.
 | `songs/` | XM songs and rendered song WAVs |
 | `instruments/` | XI instruments |
 | `samples/` | Sample audio |
-| `themes/` | Shared `.theme` files and four bundled presets |
-| `userdata/` | Settings and recovery files; created on first launch |
+| `themes/` | Shared `.theme` files and editable copies of the 16 presets |
+| `userdata/` | Settings and recovery files |
 
-Preserve your files in these five folders when updating. The installation folder remains `xm-tracker/` to keep existing data paths.
+To update, copy the whole new distribution over the existing installation, **merging folders and overwriting matching application files**. Do not delete or replace the existing `xm-tracker/` folder first. The ZIP contains only empty user folders and no root `gamecontrollerdb.txt`, so your songs, themes, settings and controller mapping stay in place.
 Rename the old `XM Tracker.sh` launcher to `Little XM Tracker.sh`.
 The app uses KNULLI's device-specific SDL2. Do not replace it with a separate SDL2 library.
 
@@ -67,12 +69,13 @@ The app uses KNULLI's device-specific SDL2. Do not replace it with a separate SD
 | A+B | Cut or clear the current field or selection |
 | Select+Left/Right | Change screen |
 | Select alone | Cancel a selection, or open Actions when nothing is selected |
-| Hold Select, then B | Start, expand or cancel a selection |
+| Hold Select, tap B | Start, expand or cancel a selection |
 | B / Select+A | Copy the selection / paste |
+| B while playing in PATTERN, without a selection | Resume following playback |
 | B+D-Pad | Navigate pages, instruments and samples quickly |
 | Start | Start playback for the current screen / stop playback |
-| Select+Start | Play from the Pattern cursor row |
-| Hold B, then Select / Start | Mute / Solo the current channel |
+| Select+Start | Play the song from Order 00 / stop playback |
+| Hold B, tap Select / Start | Mute / Solo the current channel |
 
 For button combinations, **press and hold the first button before pressing the second**. B cancels or goes back in dialogs.
 The [manual](docs/manual.html) covers each screen and links to effect references.
@@ -82,8 +85,9 @@ Edit `gamecontrollerdb.txt` beside the executable to change SDL2 controller mapp
 
 - **SAVE** writes to the current XM file; **SAVE AS** saves under a new name. Before overwriting, the previous file is kept as one backup in a `Backup/` subfolder.
 - Autosave is for recovery and does not overwrite your XM file. Recovery uses the newest valid copy from two slots, falling back to the older copy if needed.
-- Song, instrument and sample dialogs start in their default folder. Open `../` to go to the parent folder; B cancels. Theme files use only `themes/` beside the executable.
+- Set song, instrument and sample locations under **SETTINGS → DEFAULT FOLDERS**. A opens a folder; Start selects the current folder; B cancels. Choices persist across restarts. File dialogs start in the chosen folder, not the last visited one. If it is unavailable, they open beside the executable without creating folders or clearing your choice. Theme files use only `themes/` beside the executable.
 - Reads XM 1.02/1.03/1.04 and writes XM 1.04. Reads and writes XI 1.02.
+- Compact XM order headers are accepted. Recognized OpenMPT extras (comments, MIDI settings, names and extended properties) are skipped with an import notice; they are not applied or saved. OpenMPT-specific playback settings may sound different.
 - Supports 1–32 channels, up to 256 orders and 256 patterns, 1–256 rows per pattern, 128 instruments and 16 samples per instrument.
 - XM samples use mono 8/16-bit PCM. Stereo extensions, compressed samples and unknown nonzero extension data are reported as errors.
 - Original FT2 supports up to 255 orders. Keep the destination tracker's limits in mind when exchanging files.

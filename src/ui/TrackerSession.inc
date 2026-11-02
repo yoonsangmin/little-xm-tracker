@@ -1,4 +1,18 @@
 // Application preferences are separate from XM data and document history.
+    void initializeUserFiles(const std::filesystem::path& assets) {
+        std::filesystem::create_directories(themeDirectory);
+        const auto copyMissing=[](const auto& source,const auto& destination) {
+            // Empty files, directories and even dangling links belong to the
+            // user. Updates only replace the templates under assets/.
+            if(std::filesystem::symlink_status(destination).type()!=std::filesystem::file_type::not_found)return;
+            std::filesystem::copy_file(source,destination,std::filesystem::copy_options::skip_existing);
+        };
+        copyMissing(assets/"gamecontrollerdb.txt",contentDirectory/"gamecontrollerdb.txt");
+        for(const auto& entry:std::filesystem::directory_iterator(assets/"themes"))
+            if(entry.is_regular_file()&&entry.path().extension()==".theme")
+                copyMissing(entry.path(),themeDirectory/entry.path().filename());
+    }
+
     int patternTopRow() const { return (row / patternViewRows) * patternViewRows; }
     std::string patternRowLabel(int value) const {
         if(rowNumbersHex)return hex(value);
@@ -11,8 +25,22 @@
         if (!followPlayback || !transport.playing || mode != Mode::Normal || gestureBefore) return;
         if (page != Page::Song && page != Page::Pattern) return;
         if (!playingPattern) {order = std::clamp(transport.order, 0, int(doc.orders.size()) - 1);songAppendOrder=false;}
+        // A pattern loop has no engine Order position. Keep the occurrence it
+        // was started from, provided arrangement edits have not replaced it.
+        else if(patternPlaybackOrder>=0&&std::size_t(patternPlaybackOrder)<doc.orders.size()&&
+                doc.orders[std::size_t(patternPlaybackOrder)]==transport.pattern) {
+            order=patternPlaybackOrder;songAppendOrder=false;
+        }
         selectedPattern=std::clamp(transport.pattern,0,255);
         row = std::clamp(transport.row, 0, int(pattern().rows) - 1);
+    }
+
+    void resumePatternFollow() {
+        if(page!=Page::Pattern||hasSelection())return;
+        const auto live=playback->status();
+        if(!live.playing)return;
+        transport=live;followPlayback=true;
+        syncPlaybackView();
     }
 
     void loadEditorSettings() {
@@ -25,7 +53,22 @@
             while (std::getline(input,setting)) {
                 std::istringstream line(setting);
                 std::string key,trailing; int value;
-                if(!(line>>key>>value)||line>>trailing)continue;
+                if(!(line>>key))continue;
+                static constexpr std::array<const char*,3> folderKeys={"song_folder","instrument_folder","sample_folder"};
+                const auto folderKey=std::find(folderKeys.begin(),folderKeys.end(),key);
+                if(folderKey!=folderKeys.end()) {
+                    std::string folderText;
+                    line>>std::ws;
+                    if(line.peek()!='"'||!(line>>std::quoted(folderText))||line>>trailing)continue;
+                    if(folderText.find_first_of("\r\n")!=std::string::npos||folderText.find('\0')!=std::string::npos)continue;
+                    try {
+                        const auto folder=std::filesystem::u8path(folderText);
+                        if(folder.empty()||folder.is_absolute())
+                            browserFolders[std::size_t(std::distance(folderKeys.begin(),folderKey))]=folder.lexically_normal();
+                    } catch(const std::filesystem::filesystem_error&) { /* Ignore malformed paths. */ }
+                    continue;
+                }
+                if(!(line>>value)||line>>trailing)continue;
                 if (key == "repeat_delay") repeatDelay = std::clamp(value, 150, 600);
                 else if (key == "repeat_interval") repeatInterval = std::clamp(value, 35, 200);
                 else if (key == "pattern_view_channels" && (value == 4 || value == 8)) patternViewChannels = value;
@@ -59,6 +102,11 @@
             const auto c=palette[n];
             value+=std::string("theme_")+themeKeys[n]+" "+number((int(c.r)<<16)|(int(c.g)<<8)|int(c.b))+"\n";
         }
+        static constexpr std::array<const char*,3> folderKeys={"song_folder","instrument_folder","sample_folder"};
+        std::ostringstream folders;
+        for(std::size_t category=0;category<browserFolders.size();++category)
+            folders<<folderKeys[category]<<' '<<std::quoted(browserFolders[category].u8string())<<'\n';
+        value+=folders.str();
         io::writeFileAtomic(home / "editor-settings.txt", std::vector<std::uint8_t>(value.begin(), value.end()));
     }
 
@@ -101,6 +149,21 @@
         enterMenu("AUDIO OUTPUT",{});refreshAudioOutputSettings();
     }
 
+    void refreshDefaultFolderSettings() {
+        const int previousIndex=menuIndex;
+        static constexpr std::array<const char*,3> labels={"SONGS","INSTRUMENTS","SAMPLES"};
+        actions.clear();
+        for(std::size_t category=0;category<labels.size();++category) {
+            const auto folder=browserConfiguredFolder(category).u8string();
+            actions.push_back({ui::fit(std::string(labels[category])+": "+folder,58),folder,
+                [this,category]{openFolderPicker(category);}});
+        }
+        menuIndex=std::clamp(previousIndex,0,int(actions.size())-1);mode=Mode::Menu;
+    }
+    void openDefaultFolderSettings() {
+        enterMenu("DEFAULT FOLDERS",{});refreshDefaultFolderSettings();
+    }
+
     std::vector<Action> patternSettingActions() {
         const auto changed=[this]{
             saveEditorSettings();openEditorSettings();
@@ -141,6 +204,7 @@
         }});
         actions.push_back({"AUDIO OUTPUT","OUTPUT RATE AND INTERPOLATION / APPLY TO SAVE",[this]{openAudioOutputSettings();}});
         actions.push_back({"THEME COLORS","RGB COLORS / PREVIEW, RESET AND APPLY",[this]{openThemeColors();}});
+        actions.push_back({"DEFAULT FOLDERS","SONG / INSTRUMENT / SAMPLE FILE BROWSER FOLDERS",[this]{openDefaultFolderSettings();}});
         menuIndex=std::clamp(previousIndex,0,int(actions.size())-1);mode=Mode::Menu;
     }
 
@@ -213,7 +277,11 @@
         if(!dirty&&disk) {
             // A clean checkpoint represents a saved file, not unsaved work.
             // Honour subsequent edits made by another XM tracker.
-            try {doc=io::decodeXm(io::readFile(currentFile));sourceFingerprint=disk;}
+            try {
+                io::XmImportInfo importInfo;
+                doc=io::decodeXm(io::readFile(currentFile), &importInfo);sourceFingerprint=disk;
+                if(importInfo.ignoredOpenMptExtensions)notifyXmExtras();
+            }
             catch(const std::exception&){disk.reset();}
         }
         if(!disk || (dirty && (!sourceFingerprint || *sourceFingerprint!=*disk))) {

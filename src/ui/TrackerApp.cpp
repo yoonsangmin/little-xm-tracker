@@ -111,6 +111,7 @@ struct TrackerApp::Impl {
     int pendingNotePattern=0,pendingNoteRow=0,pendingNoteChannel=0;
     bool modalBackHeld = false;
     bool playingPattern = false, followPlayback = false;
+    int patternPlaybackOrder = -1;
     bool selectPending = false, selectUsed = false;
     int repeatDelay = 320, repeatInterval = 85;
     int patternViewChannels = 4, patternViewRows = 32;
@@ -162,6 +163,8 @@ struct TrackerApp::Impl {
     bool blockSelected=false;
     int blockRow=0,blockChannel=0,blockField=0,blockPattern=-1;
     std::filesystem::path currentFile, home, contentDirectory, browserDirectory;
+    std::array<std::filesystem::path,3> browserFolders{};
+    int browserFolderPicker=-1;
     std::string message;
     bool errorMessage = false;
     std::shared_ptr<Document> gestureBefore;
@@ -233,12 +236,6 @@ struct TrackerApp::Impl {
         if (!renderer) throw std::runtime_error(SDL_GetError());
         SDL_RenderSetLogicalSize(renderer, W, H);
         SDL_ShowCursor(SDL_DISABLE);
-        const auto mappings = executablePath / "gamecontrollerdb.txt";
-        if (std::filesystem::exists(mappings) && SDL_GameControllerAddMappingsFromFile(mappings.u8string().c_str()) < 0)
-            notify("COULD NOT READ gamecontrollerdb.txt", true);
-        for (int i = 0; i < SDL_NumJoysticks(); ++i) if (SDL_IsGameController(i)) {
-            gamepad = SDL_GameControllerOpen(i); if (gamepad) break;
-        }
         home = options.dataDirectory.empty()?executablePath/"userdata":std::filesystem::absolute(options.dataDirectory).lexically_normal();
         std::error_code ec;
         std::filesystem::create_directories(home, ec);
@@ -249,23 +246,24 @@ struct TrackerApp::Impl {
         if(!portableData)portableData=std::filesystem::equivalent(home,executablePath/"userdata",ec)&&!ec;
         contentDirectory=portableData?executablePath:home;
         themeDirectory=contentDirectory/"themes";
-        std::filesystem::create_directories(themeDirectory);
-        if(options.uiTest) {
-            // Test runs use their isolated data directory, never the shipped files.
-            for(const auto& entry:std::filesystem::directory_iterator(executablePath/"themes"))
-                if(entry.is_regular_file()&&entry.path().extension()==".theme")
-                    std::filesystem::copy_file(entry.path(),themeDirectory/entry.path().filename(),std::filesystem::copy_options::skip_existing);
+        initializeUserFiles(executablePath/"assets");
+        const auto mappings = contentDirectory / "gamecontrollerdb.txt";
+        if (std::filesystem::exists(mappings) && SDL_GameControllerAddMappingsFromFile(mappings.u8string().c_str()) < 0)
+            notify("COULD NOT READ gamecontrollerdb.txt", true);
+        for (int i = 0; i < SDL_NumJoysticks(); ++i) if (SDL_IsGameController(i)) {
+            gamepad = SDL_GameControllerOpen(i); if (gamepad) break;
         }
-        for(std::size_t category=0;category<3;++category)(void)browserDefaultFolder(category);
-        browserDirectory = browserDefaultFolder(0);
         loadEditorSettings();
+        browserDirectory = browserDefaultFolder(0);
         loadEnvelopePresetBank();
         doc = makeDemoDocument();
         if (!options.openPath.empty()) {
-            doc = io::decodeXm(io::readFile(options.openPath));
+            io::XmImportInfo importInfo;
+            doc = io::decodeXm(io::readFile(options.openPath), &importInfo);
             currentFile = std::filesystem::absolute(options.openPath);
             sourceFingerprint = io::fingerprintFile(currentFile);
             browserDirectory = currentFile.parent_path();
+            if (importInfo.ignoredOpenMptExtensions) notifyXmExtras();
         } else if (!options.demo && !options.uiTest && !options.smoke) {
             restoreLastWork();
         }
@@ -289,6 +287,9 @@ struct TrackerApp::Impl {
         SDL_Quit();
     }
     void notify(std::string value, bool error = false) { message = std::move(value); errorMessage = error; noticeUntil = SDL_GetTicks() + (error ? 8000u : 3000u); }
+    void notifyXmExtras() {
+        notify("OPENED / OPENMPT EXTRAS NOT APPLIED OR SAVED", true);
+    }
     int patternIndex() const { return selectedPattern; }
     Pattern& pattern() { const auto p=std::size_t(patternIndex());return p<doc.patterns.size()?doc.patterns[p]:blankPattern; }
     const Pattern& pattern() const { const auto p=std::size_t(patternIndex());return p<doc.patterns.size()?doc.patterns[p]:blankPattern; }
@@ -467,26 +468,36 @@ struct TrackerApp::Impl {
         aPreviewActive = true;
         auditionNote();
     }
-    void playToggle(bool fromCursor = false) {
+    void playToggle(bool songFromBeginning = false) {
         finishGesture();
         const auto state = playback->status();
         if (state.playing) {
             playback->stop(); followPlayback = false;
         } else {
             if (!audioReady && !options.uiTest) { notify("AUDIO IS OFF. RESTART WITH AN AVAILABLE AUDIO DEVICE.", true); return; }
+            if(songFromBeginning) {
+                const bool keepSelection=hasSelection();
+                playingPattern=false;patternPlaybackOrder=-1;songAppendOrder=false;
+                playback->playSong(0,0);
+                // Starting the whole song does not move selection endpoints.
+                // With no selection, the editor follows the new transport.
+                followPlayback=!keepSelection;
+                if(!keepSelection){order=0;selectedPattern=doc.orders.front();row=0;}
+                return;
+            }
             if(page==Page::Song&&songAppendOrder){notify("ENTER A PATTERN IN THE NEW ORDER FIRST");return;}
             playingPattern = page != Page::Song;
+            patternPlaybackOrder=playingPattern&&doc.orders[std::size_t(order)]==patternIndex()?order:-1;
             if(page==Page::Pattern&&hasSelection()) {
                 const auto range=selectedBlock();
-                playback->playPattern(patternIndex(),fromCursor?row:int(range.firstRow),false,int(range.lastRow),int(range.firstRow));
+                playback->playPattern(patternIndex(),int(range.firstRow),false,int(range.lastRow),int(range.firstRow));
                 // Keep the selection endpoints stable so A+directions can edit
                 // immediately; playback owns a separate snapshot of the loop.
                 followPlayback=false;
                 notify("LOOP "+patternRowLabel(int(range.firstRow))+"-"+patternRowLabel(int(range.lastRow)-1)+" / ALL CHANNELS");
             } else {
-                const int startRow=fromCursor&&page==Page::Pattern?row:0;
-                row = startRow;
-                if (playingPattern) playback->playPattern(patternIndex(), startRow);
+                row = 0;
+                if (playingPattern) playback->playPattern(patternIndex(), 0);
                 else {selectedPattern=doc.orders[order];playback->playSong(order, 0);}
                 followPlayback = !hasSelection();
             }
@@ -567,6 +578,10 @@ struct TrackerApp::Impl {
         return ".xm";
     }
     std::string browserTitle() const {
+        if(browserFolderPicker>=0) {
+            static const char* titles[]={"SONG FOLDER","INSTRUMENT FOLDER","SAMPLE FOLDER"};
+            return titles[browserFolderPicker];
+        }
         switch(fileAction){case FileAction::OpenXm:return "OPEN XM";case FileAction::SaveXm:return "SAVE XM AS";case FileAction::ImportXi:return "IMPORT XI";case FileAction::ExportXi:return "EXPORT XI";case FileAction::ImportAudio:return "IMPORT AUDIO";case FileAction::RenderWav:return "RENDER WAV";case FileAction::ExportWav:return "EXPORT SAMPLE WAV";case FileAction::ExportWavRange:return "EXPORT SELECTED RANGE WAV";}
         return "FILES";
     }
@@ -584,6 +599,7 @@ struct TrackerApp::Impl {
                 std::error_code itemError;bool isDir=it->is_directory(itemError);
                 if(itemError)continue;
                 if(!isDir) {
+                    if(browserFolderPicker>=0)continue;
                     const auto suffix=lower(it->path().extension().u8string());
                     if(fileAction==FileAction::ImportAudio?!io::isAudioExtension(suffix):suffix!=extension())continue;
                 }
@@ -594,13 +610,14 @@ struct TrackerApp::Impl {
                 entries.insert(entries.end(),found.begin(),found.end());
                 return;
             }
-            const auto fallback=browserDefaultFolder(browserFolderCategory(fileAction));
+            const auto fallback=browserDefaultFolder(browserFolderPicker>=0?std::size_t(browserFolderPicker):browserFolderCategory(fileAction));
             if(browserDirectory==fallback)break;
             browserDirectory=fallback;
         }
         if(ec)notify("FOLDER ERROR: "+ec.message(),true);
     }
     void openBrowser(FileAction action) {
+        browserFolderPicker=-1;
         pendingAudio.reset();playback->stopPreview(); fileAction=action;
         browserDirectory=browserDefaultFolder(browserFolderCategory(action));
         refreshBrowser(); mode=Mode::Browser;
@@ -653,6 +670,7 @@ struct TrackerApp::Impl {
         if(entries.empty())return;
         const Entry entry=entries.at(browserIndex);
         if(entry.directory){enterBrowserDirectory(entry.path);return;}
+        if(browserFolderPicker>=0)return;
         if(saving()){
             nameTarget=NameTarget::File;filename=entry.path.stem().u8string();nameCursor=0;nameRowColumn.fill(-1);mode=Mode::Name;return;
         }
@@ -668,7 +686,8 @@ struct TrackerApp::Impl {
     }
     void openDocument(const std::filesystem::path& path) {
         cancelPendingNote();
-        auto next=io::decodeXm(io::readFile(path));
+        io::XmImportInfo importInfo;
+        auto next=io::decodeXm(io::readFile(path), &importInfo);
         (void)io::encodeXm(next);
         playback->load(next);playingPattern=false;playback->setSolo(-1);playback->setMuteMask(0);
         pendingAudio.reset();
@@ -680,7 +699,8 @@ struct TrackerApp::Impl {
         held.fill(false);selectPending=false;aUsed=true;gestureBefore.reset();
         undoStack.clear();redoStack.clear();undoBytes=0;dirty=false;normalize();mode=Mode::Normal;
         browserDirectory=currentFile.parent_path();
-        notify("OPENED "+path.filename().u8string());
+        if(importInfo.ignoredOpenMptExtensions)notifyXmExtras();
+        else notify("OPENED "+path.filename().u8string());
     }
     void trimSample() {
         auto* s=currentSample();if(!s)throw std::runtime_error("NO SAMPLE");
@@ -749,11 +769,11 @@ struct TrackerApp::Impl {
         if(nextRow>=0)sampleRowFocus[std::size_t(nextRow)]=sampleField;
     }
     void normalDirection(Button b) {
-        followPlayback = false;
         const bool edit=held[static_cast<std::size_t>(Button::A)];
-        if(page==Page::Instrument&&instrumentPanelDirection(b,edit))return;
         const int sign=(b==Button::Up||b==Button::Right)?1:-1;
         const bool vertical=b==Button::Up||b==Button::Down;
+        if(page!=Page::Pattern||edit||vertical||hasSelection())followPlayback=false;
+        if(page==Page::Instrument&&instrumentPanelDirection(b,edit))return;
         if(pcmSelecting&&page==Page::Sample&&!edit){
             if(auto* pcm=currentSample())selectionEnd=std::clamp(selectionEnd+((b==Button::Down||b==Button::Right)?1:-1)*(vertical?256:1),selectionStart,int(pcm->pcm.size()));
             return;
@@ -997,6 +1017,7 @@ struct TrackerApp::Impl {
             if(mode==Mode::Normal&&!bUsed){
                 playback->stopPreview();
                 if(hasSelection())copyCurrent();
+                else resumePatternFollow();
             }
             return;
         }
@@ -1189,14 +1210,15 @@ struct TrackerApp::Impl {
     void drawBrowser() {
         overlay();rect(40,48,944,666,panel);outline(40,48,944,666,dim);txt(64,74,browserTitle(),cyan,3);
         txt(64,119,ui::fit(browserDirectory.u8string(),75),muted);
-        if(entries.empty())txt(64,180,"NO MATCHING FILES IN THIS FOLDER",muted);
+        if(entries.empty())txt(64,180,browserFolderPicker>=0?"NO SUBFOLDERS / START TO USE THIS FOLDER":"NO MATCHING FILES IN THIS FOLDER",muted);
         int first=std::clamp(browserIndex-6,0,std::max(0,int(entries.size())-browserPageSize));
         for(int n=0;n<browserPageSize&&first+n<int(entries.size());++n){int idx=first+n,y=163+n*31;
             if(idx==browserIndex){rect(56,y-6,910,29,panel2);rect(56,y-6,focusBarWidth,29,amber);}
             txt(69,y,entries[idx].directory?">":" ",entries[idx].directory?cyan:muted);
             txt(96,y,ui::fit(entries[idx].name,68),idx==browserIndex?amber:ink);
         }
-        drawDialogFooter({40,48,944,666},saving()?"LEFT/RIGHT PAGE / A OPEN / START SAVE / B CANCEL":
+        drawDialogFooter({40,48,944,666},browserFolderPicker>=0?"LEFT/RIGHT PAGE / A OPEN / START USE FOLDER / B CANCEL":
+            saving()?"LEFT/RIGHT PAGE / A OPEN / START SAVE / B CANCEL":
             "LEFT/RIGHT PAGE / A OPEN / B CANCEL",number(int(entries.size()))+" ENTRIES");
     }
     void drawName() {
@@ -1236,21 +1258,23 @@ struct TrackerApp::Impl {
             "A / A+DPAD            ENTER / EDIT VALUE",
             "A+B                   CUT / RESET",
             "SELECT+LEFT/RIGHT     CHANGE SCREEN",
-            "SELECT (TAP)          CANCEL SELECTION / ACTIONS",
+            "TAP SELECT            CANCEL SELECTION / ACTIONS",
             "HOLD SELECT, TAP B    SELECT / EXPAND / CANCEL",
             "B ON SELECTION        COPY; SELECT+A: PASTE",
-            "START                 PLAY / STOP"
+            "START                 PLAY / STOP",
+            "SELECT+START          SONG FROM ORDER 00 / STOP"
         };
         if(page==Page::Pattern) {
-            rows[1]="A HOLD / RELEASE      AUDITION / STOP; A+DPAD: EDIT";
+            rows[1]="HOLD A / RELEASE      LISTEN / STOP; A+DPAD: EDIT";
             rows[7]="START                 PLAY / STOP; SELECTION: LOOP";
             rows.push_back("SINGLE NOTE: C-0 TO OFF: A+LEFT/DOWN; BACK: A+UP/RIGHT");
-            rows.push_back("SELECT+START          PLAY FROM CURSOR");
+            rows.push_back("TAP B, NO SELECTION   RESUME FOLLOW WHILE PLAYING");
             rows.push_back("B+UP/DOWN             PAGE, THEN PREVIOUS/NEXT ORDER");
-            rows.push_back("B+LEFT/RIGHT          CHANNEL PAGE");
-            rows.push_back("VOLUME COMMAND: A+LR VALUE / A+UP/DOWN TYPE");
+            rows.push_back("LEFT/RIGHT: FIELD; B+LEFT/RIGHT: PAGE / KEEP FOLLOW");
+            rows.push_back("VOLUME COMMAND: A+LEFT/RIGHT VALUE / A+UP/DOWN TYPE");
         } else if(page==Page::Song) {
             rows[3]="SELECT+RIGHT          OPEN CURRENT ORDER PATTERN";
+            rows.push_back("ORDERS: B+UP/DOWN     PREVIOUS/NEXT PAGE");
             rows.push_back("A+DPAD ON PATTERN     CHANGE ORDER PATTERN");
             rows.push_back("A+DPAD ON ROWS        CHANGE PATTERN LENGTH");
             rows.push_back("DOWN BELOW BUTTONS    ENTER CHANNEL MONITOR");
@@ -1269,7 +1293,8 @@ struct TrackerApp::Impl {
             rows.push_back("B+LEFT/RIGHT          OWNER INSTRUMENT");
             rows[5]="HOLD SELECT, TAP B    SELECT / EXPAND / CANCEL PCM";
             rows.push_back("A ON PROCESS          PROCESS SELECTED PCM");
-            rows.push_back("A ON DRAW / PLAY      DRAW / AUDITION SAMPLE");
+            rows.push_back("A ON DRAW             OPEN DRAW");
+            rows.push_back("HOLD A ON PLAY        LISTEN; RELEASE A TO STOP");
         }
         if(page==Page::Pattern||page==Page::Song) {
             rows.push_back("HOLD B, TAP SELECT    MUTE / UNMUTE CHANNEL");

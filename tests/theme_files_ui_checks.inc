@@ -1,4 +1,60 @@
         {
+            // Updating bundled defaults must not replace any user-owned path.
+            // This fixture is independent of the real theme/settings directory.
+            {
+                const auto originalContentDirectory=contentDirectory,originalThemeDirectory=themeDirectory;
+                const auto fixture=home/("qa-user-files-"+number(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+                const auto assets=fixture/"assets";
+                contentDirectory=fixture/"content";themeDirectory=contentDirectory/"themes";
+                std::filesystem::create_directories(assets/"themes");
+                std::filesystem::create_directories(themeDirectory);
+                const std::vector<std::uint8_t> firstMapping={'f','i','r','s','t'},userData={'k','e','e','p'};
+                const auto firstTheme=io::encodeTheme(io::defaultTheme);
+                io::writeFileAtomic(assets/"gamecontrollerdb.txt",firstMapping);
+                io::writeFileAtomic(assets/"themes/default.theme",firstTheme);
+                io::writeFileAtomic(assets/"themes/amber.theme",firstTheme);
+                initializeUserFiles(assets);
+                require(io::readFile(contentDirectory/"gamecontrollerdb.txt")==firstMapping&&
+                        io::readFile(themeDirectory/"default.theme")==firstTheme&&
+                        io::readFile(themeDirectory/"amber.theme")==firstTheme,
+                        "First launch seeds missing controller mappings and bundled themes");
+
+                auto editedTheme=io::defaultTheme;editedTheme[0]=0x123456;
+                const auto userTheme=io::encodeTheme(editedTheme);
+                io::writeFileAtomic(themeDirectory/"default.theme",userTheme);
+                io::writeFileAtomic(contentDirectory/"gamecontrollerdb.txt",{});
+                io::writeFileAtomic(themeDirectory/"empty.theme",{});
+                std::filesystem::create_directories(themeDirectory/"blocked.theme");
+                io::writeFileAtomic(themeDirectory/"blocked.theme/keep",userData);
+                io::writeFileAtomic(contentDirectory/"linked-theme",userTheme);
+                std::filesystem::create_symlink("../linked-theme",themeDirectory/"linked.theme");
+                std::filesystem::create_symlink("../missing-theme",themeDirectory/"dangling.theme");
+                for(const char* category:{"songs","samples"}) {
+                    std::filesystem::create_directories(contentDirectory/category);
+                    io::writeFileAtomic(contentDirectory/category/"keep",userData);
+                }
+                auto updatedTheme=io::defaultTheme;updatedTheme[0]=0x654321;
+                const auto bundledUpdate=io::encodeTheme(updatedTheme);
+                io::writeFileAtomic(assets/"gamecontrollerdb.txt",{'n','e','w'});
+                for(const char* name:{"default.theme","amber.theme","empty.theme","blocked.theme","linked.theme","dangling.theme","new.theme"})
+                    io::writeFileAtomic(assets/"themes"/name,bundledUpdate);
+                std::filesystem::remove(themeDirectory/"amber.theme");
+                initializeUserFiles(assets);
+                require(io::readFile(contentDirectory/"gamecontrollerdb.txt").empty()&&
+                        io::readFile(themeDirectory/"default.theme")==userTheme&&io::readFile(themeDirectory/"empty.theme").empty(),
+                        "New bundled defaults preserve customized themes and intentionally empty user files");
+                require(io::readFile(themeDirectory/"blocked.theme/keep")==userData&&
+                        std::filesystem::read_symlink(themeDirectory/"linked.theme")=="../linked-theme"&&
+                        std::filesystem::read_symlink(themeDirectory/"dangling.theme")=="../missing-theme"&&
+                        io::readFile(contentDirectory/"linked-theme")==userTheme&&
+                        !std::filesystem::exists(contentDirectory/"missing-theme"),
+                        "Initialization preserves directories and both valid and dangling user symlinks");
+                require(io::readFile(themeDirectory/"amber.theme")==bundledUpdate&&
+                        io::readFile(themeDirectory/"new.theme")==bundledUpdate&&
+                        io::readFile(contentDirectory/"songs/keep")==userData&&io::readFile(contentDirectory/"samples/keep")==userData,
+                        "Initialization adds missing or new presets without touching song and sample content");
+                contentDirectory=originalContentDirectory;themeDirectory=originalThemeDirectory;
+            }
             const auto savedThemePreferences=io::readFile(home/"editor-settings.txt");
             const auto savedThemePalette=palette;
             const auto themeFileSong=io::encodeXm(doc);
@@ -13,8 +69,10 @@
                 return result;
             };
             require(themeDirectory==contentDirectory/"themes","theme files use the fixed themes folder beside the portable content");
-            for(const char* name:{"default.theme","amber.theme","midnight.theme","mono.theme"})
-                require(io::decodeTheme(io::readFile(themeDirectory/name)).size()==palette.size(),"all four shipped presets are available as valid theme files");
+            for(const char* name:{"default.theme","midnight.theme","amber.theme","mono.theme",
+                    "ocean.theme","forest.theme","phosphor.theme","cobalt.theme","arcade.theme","ember.theme",
+                    "ice.theme","lavender.theme","rose.theme","copper.theme","sand.theme","paper.theme"})
+                require(io::decodeTheme(io::readFile(themeDirectory/name)).size()==palette.size(),"all 16 shipped presets are available as valid theme files");
             const auto token=number(std::chrono::high_resolution_clock::now().time_since_epoch().count());
             const auto sharedPath=themeDirectory/("qa-shared-"+token+".THEME");
             auto shared=io::defaultTheme;shared[0]=0x22152d;shared[6]=0xe9a5ff;

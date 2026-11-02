@@ -72,19 +72,13 @@ if(TRACKER_BUILD_APP)
     add_custom_command(TARGET littlexm-tracker POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:littlexm-tracker>/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/assets/gamecontrollerdb.txt" "$<TARGET_FILE_DIR:littlexm-tracker>/gamecontrollerdb.txt"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets/themes" "$<TARGET_FILE_DIR:littlexm-tracker>/themes"
         VERBATIM)
     install(TARGETS littlexm-tracker RUNTIME DESTINATION .)
     install(FILES README.md LICENSE THIRD_PARTY_NOTICES.txt DESTINATION .)
     install(FILES docs/manual.html docs/index.html DESTINATION docs)
     install(DIRECTORY docs/images/ DESTINATION docs/images)
-    install(FILES assets/gamecontrollerdb.txt DESTINATION .)
     install(DIRECTORY licenses/ DESTINATION licenses)
-    install(DIRECTORY assets/ DESTINATION assets PATTERN "themes" EXCLUDE)
-    install(DIRECTORY assets/themes/ DESTINATION themes)
+    install(DIRECTORY assets/ DESTINATION assets)
 endif()
 
 if(TRACKER_BUILD_TESTS)

@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Rose
+background #21141C
+panel #30212B
+highlight #44303D
+text #FAE8ED
+secondary_text #C3A0B0
+dim_text #7C596D
+accent #FFA6C6
+cursor #FFE096
+volume #9AD8BD
+warning #FFB28B
+selection #54374C
+sample_selection #443342
+overlay #10090F

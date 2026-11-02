@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Arcade
+background #1A1025
+panel #291B37
+highlight #3B284A
+text #F8ECFF
+secondary_text #C9ABD8
+dim_text #796489
+accent #66EEF3
+cursor #FFE56D
+volume #98EEAB
+warning #FFA6CB
+selection #493358
+sample_selection #402C4E
+overlay #0D0613

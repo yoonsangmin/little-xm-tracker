@@ -9,7 +9,11 @@ namespace brick::io {
 // Unsupported variants and malformed inputs throw std::runtime_error.
 // Read XM 1.02/1.03/1.04; always write the standard 1.04 layout.
 std::vector<std::uint8_t> encodeXm(const Document& document);
-Document decodeXm(const std::vector<std::uint8_t>& bytes);
+struct XmImportInfo {
+    // Recognized OpenMPT extras are bounded and skipped, not applied or saved.
+    bool ignoredOpenMptExtensions = false;
+};
+Document decodeXm(const std::vector<std::uint8_t>& bytes, XmImportInfo* info = nullptr);
 std::vector<std::uint8_t> encodeXi(const Instrument& instrument);
 Instrument decodeXi(const std::vector<std::uint8_t>& bytes);
 std::vector<std::uint8_t> readFile(const std::filesystem::path& path);

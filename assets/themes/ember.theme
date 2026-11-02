@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Ember
+background #1C1312
+panel #2B1E1B
+highlight #3B2C26
+text #FFF0DC
+secondary_text #CDB39C
+dim_text #80675B
+accent #FFB46E
+cursor #FFDA76
+volume #CDD48A
+warning #FFA394
+selection #503930
+sample_selection #443128
+overlay #0F0806

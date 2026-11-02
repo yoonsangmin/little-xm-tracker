@@ -9,13 +9,15 @@ into roms/ports on KNULLI SHARE:
   SHARE/roms/ports/Little XM Tracker.sh
   SHARE/roms/ports/xm-tracker/
     littlexm-tracker
-    gamecontrollerdb.txt
+    assets/gamecontrollerdb.txt        (packaged default)
+    assets/themes/                    (packaged default themes)
     assets/fonts/unifont-18.0.01.hex
-    songs/                            (XM songs and rendered song WAVs)
-    instruments/                      (XI instruments)
-    samples/                          (sample audio)
-    themes/                           (.theme files and four bundled presets)
-    userdata/                         (settings and recovery; created on first launch)
+    docs/manual.html
+    songs/                            (empty)
+    instruments/                      (empty)
+    samples/                          (empty)
+    themes/                           (empty)
+    userdata/                         (empty)
 
 On the device, this location is /userdata/roms/ports.
 Refresh the KNULLI game list, then launch Ports > Little XM Tracker.
@@ -31,19 +33,31 @@ The manual is at xm-tracker/docs/manual.html. Open it in a browser to read offli
 Files and updates
 -----------------
 Put XM songs in songs, XI instruments in instruments, and sample audio in samples.
-These three folders are beside the executable and are included as empty folders.
 userdata holds two recovery autosaves and application settings.
-themes holds shared .theme files and the Default, Midnight, Amber and Mono presets.
-Preserve your files in songs, instruments, samples, themes and userdata when updating.
+themes holds shared .theme files and 16 bundled presets.
+The ZIP includes these five folders empty, with no user files or root gamecontrollerdb.txt.
+On launch, userdata and themes are created if needed. Missing theme presets and
+the editable root gamecontrollerdb.txt are copied from assets. Existing files,
+including an empty mapping file, are kept. Removed song, instrument and sample
+folders are not recreated.
+To update, copy the entire new distribution over the existing installation:
+merge folders and overwrite matching application files. Do not delete or replace
+the existing xm-tracker folder first. Your files in the five user folders and
+your controller mapping stay in place.
 Rename the old XM Tracker.sh to Little XM Tracker.sh, then overwrite it with the new launcher.
 Keep the xm-tracker/ folder name to preserve existing data paths.
 Existing userdata and songs, instruments or samples elsewhere are not moved or deleted automatically.
 
-Song, instrument and sample dialogs start in the default songs / instruments / samples folder.
-They do not remember the last visited folder. Up/Down moves one item; Left/Right moves 15 items.
+SETTINGS > DEFAULT FOLDERS lets you choose SONGS / INSTRUMENTS / SAMPLES locations.
+In the folder picker, A opens a folder, Start selects the current folder, and
+B cancels back to settings. Select is unused. Choices persist across restarts.
+File dialogs start in the chosen category folder, not the last visited folder.
+If it is missing or unreadable, the dialog opens beside the executable without
+creating the path or clearing your choice. The path is used again when available.
+Up/Down moves one item; Left/Right moves 15 items.
 A opens a file or folder, B cancels, and Select is unused.
 Open ../ with A to go to the parent folder; the cursor stays on the folder you just left.
-SAVE writes to an existing song's original XM file. SAVE AS starts in songs.
+SAVE writes to an existing song's original XM file. SAVE AS uses the chosen song folder.
 
 Controls and exit
 -----------------
@@ -60,12 +74,18 @@ For selected pattern notes, A+Left/Right transposes by a semitone; A+Up/Down by 
 The sample PROCESS button opens processing options while keeping the selection.
 When a sample range is selected with Select+B, A opens PROCESS directly.
 
-Select+Start in Pattern plays from the cursor row without restoring earlier rows' effect state.
+While stopped, Select+Start from any main screen plays the whole song from Order 00, row 00.
+Start in SONG plays from the selected Order; in PATTERN it loops the pattern from row 00,
+or the selected rows if a selection exists. Start or Select+Start while playing stops.
+Select+Start preserves a selection without looping it; follow stays paused while it is active.
 The top bar shows the current BPM and final L/R output meters.
 A+B cuts; Select+A pastes. B+D-Pad navigates patterns, channel pages, instruments and samples.
 In PATTERN, B+Up/Down moves through 16/32-row pages, then to the previous/next order at the page boundary.
 It keeps the relative row within the page, entering the previous order on its last page and the next on its first.
-In PATTERN or the SONG channel monitor, hold B first, then press Select for Mute or Start for Solo.
+Left/Right and B+Left/Right in PATTERN keep follow active while browsing columns/channels.
+Moving between rows/patterns, editing or selecting pauses follow. While playing in PATTERN,
+tap B with no selection to resume follow without restarting. With a selection, B copies and ends it first.
+In PATTERN or the SONG channel monitor, hold B, tap Select for Mute or tap Start for Solo.
 You can keep holding B and repeat Select/Start. Release the second button before pressing it again.
 Empty slots can be browsed. Navigation, playback and canceling dialogs do not modify the song.
 
@@ -73,6 +93,7 @@ On SONG's final '..' order row, A adds the last pattern number +1, stopping at F
 For insertion, use Select > ORDER MANAGEMENT > INSERT ORDER.
 This inserts the same pattern reference before the current position and shifts later orders down.
 In the order grid, Left/Right selects PATTERN/ROWS; A+D-Pad changes the number or length.
+B+Up/Down moves one page (nine Orders); B+Left/Right is unused in the order grid.
 Shortening a pattern asks for confirmation and affects every order using that pattern.
 
 View controls in Actions > CONTROLS. Exit with SONG Actions > EXIT.
@@ -83,6 +104,7 @@ PATTERN ROWS (16/32 rows) and ROW NUMBERS (DEC/HEX).
 Display settings do not change the actual pattern length or channel count.
 
 SETTINGS > THEME COLORS edits RGB colors and offers LOAD THEME / SAVE THEME.
+Choose a preset with LOAD THEME, then APPLY to use it.
 Theme files stay in themes beside the executable; the picker has no parent folder or custom path.
 LOAD THEME previews a draft. APPLY saves active colors across restarts; B cancels.
 SAVE THEME exports the draft without applying it: choose NEW THEME... for a name,

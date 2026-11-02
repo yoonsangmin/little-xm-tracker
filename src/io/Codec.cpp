@@ -71,6 +71,33 @@ public:
     }
 };
 
+bool skipXmExtensions(Reader& reader, std::size_t instruments) {
+    const bool found = reader.left() != 0;
+    bool instrumentProperties = false, songProperties = false;
+    while (reader.left()) {
+        const auto tag = reader.text(4);
+        if (!songProperties && tag == "STPM") {
+            songProperties = true;
+        } else if (!instrumentProperties && !songProperties && tag == "XTPM") {
+            instrumentProperties = true;
+        } else if (instrumentProperties || songProperties) {
+            // OpenMPT MPTX stores one value per instrument; MPTS stores one
+            // value per song. Never treat these as ordinary sized chunks.
+            require(std::all_of(tag.begin(), tag.end(), [](unsigned char c) {
+                return c >= 0x20 && c <= 0x7E;
+            }), "Invalid OpenMPT property ID");
+            const auto size = reader.u16();
+            reader.skip(std::size_t(size) * (songProperties ? 1 : instruments));
+        } else {
+            require(tag == "text" || tag == "MIDI" || tag == "PNAM" || tag == "CNAM",
+                    "XM has trailing extension data unsupported by this version");
+            const auto size = reader.u32();
+            reader.skip(size);
+        }
+    }
+    return found;
+}
+
 std::int8_t signed8(std::uint8_t value) {
     return static_cast<std::int8_t>(value < 128 ? int(value) : int(value) - 256);
 }
@@ -301,7 +328,8 @@ void checkFileSize(std::size_t size) { require(size <= maxFileBytes, "File excee
 
 } // namespace
 
-Document decodeXm(const std::vector<std::uint8_t>& bytes) {
+Document decodeXm(const std::vector<std::uint8_t>& bytes, XmImportInfo* info) {
+    if (info) *info = {};
     checkFileSize(bytes.size());
     Reader reader(bytes);
     require(reader.text(17) == "Extended Module: ", "Not an XM module");
@@ -312,7 +340,7 @@ Document decodeXm(const std::vector<std::uint8_t>& bytes) {
     const auto version = reader.u16();
     require(version >= 0x0102 && version <= 0x0104, "Only XM 1.02, 1.03 and 1.04 are supported");
     const auto headerSize = reader.u32();
-    require(headerSize >= 276, "XM header is too small");
+    require(headerSize >= 20, "XM header is too small");
     auto header = reader.take(headerSize - 4);
     const auto orderCount = header.u16();
     document.restart = header.u16();
@@ -329,7 +357,12 @@ Document decodeXm(const std::vector<std::uint8_t>& bytes) {
     require(patternCount <= 256 && instrumentCount <= 128, "XM exceeds 256 patterns or 128 instruments");
     require(document.speed >= 1 && document.speed <= 31 && document.bpm >= 32 && document.bpm <= 255,
             "XM initial speed/BPM is outside supported FT2 range");
-    for (std::size_t i = 0; i < 256; ++i) {
+    // OpenMPT and other writers may omit unused order-table slots. The
+    // declared header still needs all 16 fixed bytes and every active order;
+    // never borrow bytes from the following pattern/instrument to fill it.
+    const auto orderTableSize = std::min<std::size_t>(256, header.left());
+    require(orderTableSize >= orderCount, "XM header does not contain all declared orders");
+    for (std::size_t i = 0; i < orderTableSize; ++i) {
         const auto value = header.u8();
         if (i < orderCount) document.orders.push_back(value);
     }
@@ -383,7 +416,8 @@ Document decodeXm(const std::vector<std::uint8_t>& bytes) {
         validateInstrument(loaded.instrument);
         document.instruments.push_back(std::move(loaded.instrument));
     }
-    require(reader.left() == 0, "XM has trailing extension data unsupported by this version");
+    const bool ignoredExtensions = skipXmExtensions(reader, instrumentCount);
+    if (info) info->ignoredOpenMptExtensions = ignoredExtensions;
     return document;
 }
 

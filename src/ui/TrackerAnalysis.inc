@@ -199,7 +199,7 @@
         }
         if(mode!=Mode::ChopSettings||!analysisSource)return;
         const std::string_view hints=chopField==3?"A BUILD PREVIEW / B CANCEL":
-            chopField==5?"A LISTEN / B CANCEL":chopField==6?"A APPLY CHOP / B CANCEL":"A+DPAD VALUE / B CANCEL";
+            chopField==5?"A LISTEN / B CANCEL":chopField==6?"A APPLY CHOP / B CANCEL":"A+DPAD EDIT / B CANCEL";
         drawToolPanel("CHOP SAMPLE",634,hints);
         const int x=100,y=150,width=824,height=136;
         rect(x,y,width,height,bg);line(x,y+height/2,x+width,y+height/2,dim);

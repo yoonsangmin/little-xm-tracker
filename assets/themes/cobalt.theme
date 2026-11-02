@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Cobalt
+background #0C1333
+panel #152247
+highlight #21305B
+text #EBF0FF
+secondary_text #A3B4DF
+dim_text #536990
+accent #85C9FF
+cursor #FFE277
+volume #A3EBB7
+warning #FF9EBA
+selection #2D4068
+sample_selection #26385D
+overlay #04081C

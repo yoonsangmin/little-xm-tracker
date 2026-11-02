@@ -211,8 +211,8 @@
         rect(392,60,612,332,panel);
         txt(40,78,"ORDER",muted);txt(160,78,"PATTERN",muted);txt(280,78,"ROWS",muted);
         const int total=int(doc.orders.size())+(doc.orders.size()<256?1:0);
-        const int first=std::clamp(songOrderCursor()-4,0,std::max(0,total-9));
-        for (int n=0;n<9 && first+n<total;++n) {
+        const int first=std::clamp(songOrderCursor()-songOrderPageRows/2,0,std::max(0,total-songOrderPageRows));
+        for (int n=0;n<songOrderPageRows && first+n<total;++n) {
             const int index=first+n, y=110+n*26;
             const bool append=index==int(doc.orders.size());
             const bool selected=index==songOrderCursor();
@@ -355,7 +355,7 @@
                         "Pattern "+hex(id)+(uses>1?" - Shared by "+number(uses)+" orders; edits affect every use":" - Used by this order");
                 }
             }
-            if(songField==12)context="Channel "+channelNumber(channel)+" - B then SELECT: Mute / B then START: Solo";
+            if(songField==12)context="Channel "+channelNumber(channel)+" - HOLD B, TAP SELECT: MUTE / TAP START: SOLO";
         } else if (page==Page::Instrument) {
             static const char* meanings[]={
                 "Sample slot - Sample within this instrument", "Map note - Key to assign a sample to",
@@ -365,9 +365,9 @@
                 "Name - Rename this instrument", "Load XI - Replace this instrument",
                 "Volume envelope - Edit points", "Panning envelope - Edit points",
                 "Key map / Settings - Switch instrument view", "Sample - A opens editor / A+B deletes this slot",
-                "Key map - A+directions changes this note's sample"};
+                "Key map - A+DPAD changes this note's sample"};
             context=meanings[std::clamp(instrumentField,0,14)];
-            if(instrumentField==14)context=noteName(keymapNote)+" - A+directions maps sample / A+B resets to 00";
+            if(instrumentField==14)context=noteName(keymapNote)+" - A+DPAD maps sample / A+B resets to 00";
         } else {
             static const char* meanings[]={
                 "Volume - Default sample volume, 00 to 40", "Panning - Default position, 00 left to FF right",
@@ -393,7 +393,7 @@
         const int contextRight=detail.empty()?detailRight:detailX-24;
         const int contextChars=std::max(0,(contextRight-20)/12);
         if(mode==Mode::Normal&&channelControlContext()&&held[std::size_t(Button::B)])
-            context="HOLD B, TAP SELECT: MUTE / START: SOLO";
+            context="HOLD B, TAP SELECT: MUTE / TAP START: SOLO";
         txt(20,746,ui::fit(context,contextChars),amber);
         if(!detail.empty()) txt(detailX,746,detail,muted);
     }

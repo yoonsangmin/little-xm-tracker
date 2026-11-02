@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Sand
+background #EEE2C8
+panel #E1D0AC
+highlight #CEB78E
+text #372B21
+secondary_text #6B533B
+dim_text #9F8764
+accent #663D25
+cursor #593B24
+volume #304F2D
+warning #8A3240
+selection #C7B391
+sample_selection #D1C09D
+overlay #362719

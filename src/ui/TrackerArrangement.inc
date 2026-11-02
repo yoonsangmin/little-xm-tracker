@@ -1,5 +1,6 @@
 // An order stores only a pattern reference. Pattern navigation follows these
 // positions, including repeated IDs; variations explicitly create a new pattern.
+    static constexpr int songOrderPageRows = 9;
     int songOrderCursor() const { return songAppendOrder?int(doc.orders.size()):order; }
     void moveSongOrderCursor(int delta) {
         const int last=int(doc.orders.size())-(doc.orders.size()==256||orderBlockSelected?1:0);

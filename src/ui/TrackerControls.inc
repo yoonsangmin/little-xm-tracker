@@ -191,15 +191,19 @@
         clearSelection();
     }
     void navigateWithB(Button b) {
-        finishGesture();followPlayback=false;bUsed=true;playback->stopPreview();clearSelection();
+        finishGesture();bUsed=true;
         const bool vertical=b==Button::Up||b==Button::Down;
+        if(page==Page::Song&&songField!=12&&!vertical)return;
+        if(page!=Page::Pattern||vertical||hasSelection())followPlayback=false;
+        playback->stopPreview();clearSelection();
         const int direction=(b==Button::Down||b==Button::Right)?1:-1;
         if(page==Page::Pattern) {
             if(vertical)movePatternPage(direction);
             else channel=std::clamp(channel+direction*patternViewChannels,0,int(doc.channels)-1);
         } else if(page==Page::Song) {
             if(songField==12)navigateSongMonitor(b,true);
-            else moveSongOrderCursor(direction*(vertical?1:8));
+            else if(songField==0&&vertical)moveSongOrderCursor(direction*songOrderPageRows);
+            else if(vertical)moveSongOrderCursor(direction);
         }
         else if((page==Page::Instrument&&vertical)||(page==Page::Sample&&!vertical)) {
             instrument=std::clamp(instrument+direction,1,128);sample=0;

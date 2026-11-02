@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Phosphor
+background #071109
+panel #0E1B10
+highlight #162A19
+text #D9FFD7
+secondary_text #94C892
+dim_text #487449
+accent #79EF7D
+cursor #D9FF79
+volume #B6E96D
+warning #FFE085
+selection #203E26
+sample_selection #1B3420
+overlay #020803

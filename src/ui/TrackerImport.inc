@@ -47,7 +47,7 @@
 
     void drawAudioImport() {
         if(!pendingAudio)return;
-        const std::string_view hints=importField==2?"A IMPORT / B CANCEL":"A+DPAD VALUE / B CANCEL";
+        const std::string_view hints=importField==2?"A IMPORT / B CANCEL":"A+DPAD EDIT / B CANCEL";
         drawToolPanel("IMPORT AUDIO",568,hints);
         txt(100,175,ui::fit(pendingAudioPath.filename().u8string(),68),ink);
         const auto& source=*pendingAudio;

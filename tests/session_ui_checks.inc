@@ -10,12 +10,17 @@
         changePage(Page::Pattern);
         require(playback->status().playing&&!playingPattern,"navigation preserves song transport scope");
         tap(Button::Start);require(!playback->status().playing,"Start in another view stops playback");
-        row=19;selectChord(Button::Start);
-        require(playingPattern&&playback->status().playing&&playback->status().row==19&&row==19&&
-                followPlayback&&mode==Mode::Normal,
-                "Select+Start begins at the pattern cursor and its release cannot open Actions");
-        selectChord(Button::Start);
-        require(!playback->status().playing&&mode==Mode::Normal,"Select+Start while playing stops without a menu");
+        for(const auto view:{Page::Song,Page::Pattern,Page::Instrument,Page::Sample}) {
+            changePage(view);order=1;row=19;clearSelection();
+            songAppendOrder=view==Page::Song;
+            selectChord(Button::Start);
+            require(!playingPattern&&playback->status().playing&&playback->status().order==0&&
+                    playback->status().row==0&&followPlayback&&!songAppendOrder&&page==view&&mode==Mode::Normal,
+                    "Select+Start begins the whole song in every main view, including the Song append row");
+            selectChord(Button::Start);
+            require(!playback->status().playing&&mode==Mode::Normal,"Select+Start while playing stops without a menu");
+        }
+        changePage(Page::Pattern);
         row=19;tap(Button::Start);
         require(playingPattern&&playback->status().row==0&&followPlayback,"Pattern Start loops from row zero and restores follow");
         std::vector<std::int16_t> followPcm(1200*2);

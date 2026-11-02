@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Paper
+background #F3F1E9
+panel #E4E1D6
+highlight #D3D0C3
+text #282D31
+secondary_text #59605C
+dim_text #92988F
+accent #254E68
+cursor #343F4A
+volume #3C6045
+warning #913D3C
+selection #C5CFCC
+sample_selection #D0D8CB
+overlay #252A28

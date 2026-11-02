@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Ice
+background #EEF5F8
+panel #DBE8F0
+highlight #C7DCE9
+text #163047
+secondary_text #3A5B70
+dim_text #829CAB
+accent #005D83
+cursor #164A66
+volume #216349
+warning #92364C
+selection #BDD7E7
+sample_selection #C9E0E8
+overlay #192F42

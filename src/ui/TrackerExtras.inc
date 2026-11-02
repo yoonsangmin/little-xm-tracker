@@ -693,7 +693,7 @@
         if(mode==Mode::WaveDraw) {
             if(wavePresetOpen){drawWavePresets();return;}
             if(!drawingSample)return;
-            const auto hint=wavePreviewHint(waveDrawFocus==0?"LEFT/RIGHT POINT / A+DPAD VALUE / A+B ZERO / B CANCEL":
+            const auto hint=wavePreviewHint(waveDrawFocus==0?"LEFT/RIGHT POINT / A+DPAD EDIT / A+B ZERO / B CANCEL":
                 waveDrawFocus==1?"LEFT/RIGHT POINT / A+DPAD EDIT POINTS / B CANCEL":
                 waveDrawFocus==2?"A NEW WAVE / B CANCEL":waveDrawFocus==3?"A ZERO ENTIRE SAMPLE / B CANCEL":"A APPLY / B CANCEL");
             drawToolPanel("DRAW WAVEFORM",548+controlHeight,hint);const auto& pcm=drawingSample->pcm;

@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Ocean
+background #071A25
+panel #0D2735
+highlight #173747
+text #DDF6FF
+secondary_text #95B9C9
+dim_text #496878
+accent #5FE2EA
+cursor #FFCE78
+volume #83DFBB
+warning #FF9D9A
+selection #204553
+sample_selection #1A3B49
+overlay #030D15

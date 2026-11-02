@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Forest
+background #0B1812
+panel #14271C
+highlight #20392A
+text #E4F3DF
+secondary_text #A6C4A8
+dim_text #526F57
+accent #A2DB81
+cursor #F3D37A
+volume #79D9AC
+warning #FFA49A
+selection #2A4934
+sample_selection #24402F
+overlay #040C07

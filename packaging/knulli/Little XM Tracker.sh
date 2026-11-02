@@ -6,9 +6,6 @@ BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 APP_DIR="$BASE_DIR/xm-tracker"
 DATA_DIR="$APP_DIR/userdata"
 mkdir -p "$DATA_DIR"
-# The app can fall back to its root if a content folder is blocked by a file or
-# permissions. Keep that case from preventing startup under set -e.
-mkdir -p "$APP_DIR/songs" "$APP_DIR/instruments" "$APP_DIR/samples" 2>/dev/null || true
 
 # Keep the previous launch for troubleshooting without growing the log forever.
 if [ -f "$DATA_DIR/launcher.log" ]; then
@@ -40,8 +37,14 @@ fi
 # names buttons after Brick's printed labels. The last mapping wins for Brick's
 # GUID; keep any firmware mappings for other controllers. Nothing is installed
 # into the firmware or the user's persistent controller settings.
-if [ -r "$APP_DIR/gamecontrollerdb.txt" ]; then
-    BRICK_MAPPING=$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$APP_DIR/gamecontrollerdb.txt" | tr -d '\r')
+MAPPING_FILE="$APP_DIR/gamecontrollerdb.txt"
+# The app creates its editable copy on first launch. Use the packaged default
+# for this first process only; an existing empty file or symlink always wins.
+if [ ! -e "$MAPPING_FILE" ] && [ ! -L "$MAPPING_FILE" ]; then
+    MAPPING_FILE="$APP_DIR/assets/gamecontrollerdb.txt"
+fi
+if [ -r "$MAPPING_FILE" ]; then
+    BRICK_MAPPING=$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$MAPPING_FILE" | tr -d '\r')
     if [ -n "$BRICK_MAPPING" ]; then
         if [ -n "${SDL_GAMECONTROLLERCONFIG:-}" ]; then
             SDL_GAMECONTROLLERCONFIG="$SDL_GAMECONTROLLERCONFIG

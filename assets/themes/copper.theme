@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Copper
+background #1B1715
+panel #28201C
+highlight #3B2D24
+text #F4E5D2
+secondary_text #BFA58A
+dim_text #766252
+accent #E9AF79
+cursor #FFE2A1
+volume #B9D391
+warning #FF9D82
+selection #513D2C
+sample_selection #40362A
+overlay #0D0A08

@@ -338,6 +338,65 @@
 
             resetEightButtons();
 
+            // Following moves the row, not the chosen channel/field. Reattach
+            // from live playback state after navigation without restarting PCM.
+            doc.orders={0,0,1};playback->load(doc);
+            playback->playSong(1);playingPattern=false;followPlayback=true;
+            std::vector<std::int16_t> followNavigationPcm(12000*2);
+            playback->readFrames(followNavigationPcm.data(),12000);
+            draw();field=2;channel=1;
+            const auto beforeFollowNavigation=io::encodeXm(doc);
+            tap(Button::Right);tap(Button::Left);
+            require(followPlayback&&field==2&&channel==1,
+                    "Horizontal field navigation keeps an active playback follow");
+            field=4;tap(Button::Right);
+            require(followPlayback&&field==0&&channel==2,
+                    "Crossing a channel boundary keeps an active playback follow");
+            optionChord(Button::Right);
+            require(followPlayback&&channel==10&&field==0,
+                    "B+Right preserves active follow while moving the visible channel page");
+            tap(Button::Down);const auto detachedRow=row;
+            require(!followPlayback,"Manual row navigation detaches follow");
+            optionChord(Button::Left);tap(Button::Right);
+            require(!followPlayback&&row==detachedRow&&channel==2&&field==1,
+                    "Horizontal moves and releasing their B modifier never reattach a detached view");
+            // Do not draw between advancing audio and B: the transport cache is
+            // deliberately stale, and the repeated pattern must retain Order 1.
+            playback->readFrames(followNavigationPcm.data(),12000);
+            const auto beforeFollowResume=playback->status();
+            tap(Button::B);
+            require(followPlayback&&order==1&&selectedPattern==0&&row==beforeFollowResume.row&&
+                    channel==2&&field==1&&playback->status().elapsedSeconds==beforeFollowResume.elapsedSeconds&&
+                    !playingPattern&&io::encodeXm(doc)==beforeFollowNavigation&&undoStack.empty(),
+                    "B reattaches to fresh transport and the repeated Order without restarting audio or editing music");
+            chord({Button::Right});
+            require(!followPlayback&&playback->status().playing,"A+direction editing detaches follow but preserves transport");
+            for(const auto secondary:{Button::Select,Button::Start}) {
+                optionChord(secondary);
+                require(!followPlayback&&playback->status().playing,
+                        "Mute/solo chord releases cannot become a B follow-resume tap");
+            }
+            playback->setSolo(-1);playback->setMuteMask(0);solo=-1;
+            changePage(Page::Instrument);tap(Button::B);
+            require(!followPlayback&&playback->status().playing,
+                    "B follow-resume is scoped to Pattern rather than instrument navigation");
+            resetEightButtons();
+
+            doc.orders={0,0,1};order=1;selectedPattern=0;playback->load(doc);
+            tap(Button::Start);playback->readFrames(followNavigationPcm.data(),12000);draw();
+            const auto beforePatternResume=playback->status();
+            optionChord(Button::Down);
+            require(order==2&&selectedPattern==1&&!followPlayback&&playingPattern,
+                    "A looping pattern can be left to browse the next Order without changing playback scope");
+            tap(Button::B);
+            require(order==1&&selectedPattern==0&&followPlayback&&playingPattern&&
+                    playback->status().elapsedSeconds==beforePatternResume.elapsedSeconds,
+                    "B restores the exact originating Order occurrence of a pattern loop without restarting audio");
+            optionChord(Button::Up);
+            require(order==0&&selectedPattern==0&&!followPlayback,
+                    "After pattern-loop follow resumes, previous Order navigation uses the restored occurrence");
+            resetEightButtons();
+
             row=8;selectChord(Button::B);tap(Button::Down);tap(Button::Down);
             const auto selectedBeforePlay=selectedBlock();
             tap(Button::Start);
@@ -358,15 +417,31 @@
                     "Changing screens does not replace a playing selection loop");
             tap(Button::Start);require(!playback->status().playing&&playback->status().loopFirstRow<0,
                     "Start stops and clears the selection loop from another screen");
-            changePage(Page::Pattern);row=6;selectChord(Button::B);tap(Button::Down);
+            changePage(Page::Pattern);doc.orders={0,1};playback->load(doc);order=1;selectedPattern=1;
+            row=6;selectChord(Button::B);tap(Button::Down);
             selectChord(Button::Start);
-            require(playback->status().playing&&playback->status().row==7&&playback->status().loopFirstRow==6&&
-                    playback->status().loopEndRow==8&&
-                    mode==Mode::Normal&&!followPlayback&&hasSelection(),
-                    "Select+Start begins at the cursor but loops the complete selected range without moving selection");
+            require(playback->status().playing&&!playingPattern&&playback->status().order==0&&
+                    playback->status().row==0&&playback->status().loopFirstRow<0&&playback->status().loopEndRow<0&&
+                    mode==Mode::Normal&&!followPlayback&&hasSelection()&&selectedPattern==1&&row==7&&
+                    selectedBlock().firstRow==6&&selectedBlock().lastRow==8,
+                    "Select+Start plays the whole song while retaining a selection in another pattern");
             tap(Button::Start);tap(Button::Select);tap(Button::Start);
             require(playback->status().row==0&&playback->status().loopFirstRow<0&&followPlayback,
                     "Starting without a selection restores ordinary pattern playback and follow");
+            resetEightButtons();
+
+            row=8;selectChord(Button::B);tap(Button::Down);tap(Button::Start);
+            playback->readFrames(followNavigationPcm.data(),12000);
+            const auto selectedLoopStatus=playback->status();
+            tap(Button::B);
+            require(!hasSelection()&&!followPlayback&&blockClipboard&&blockClipboard->rows==2&&
+                    playback->status().loopFirstRow==8&&playback->status().loopEndRow==10&&
+                    playback->status().elapsedSeconds==selectedLoopStatus.elapsedSeconds,
+                    "First B copies and clears the selection without reattaching or replacing its playback loop");
+            tap(Button::B);
+            require(followPlayback&&row==selectedLoopStatus.row&&playback->status().loopFirstRow==8&&
+                    playback->status().loopEndRow==10&&playback->status().elapsedSeconds==selectedLoopStatus.elapsedSeconds,
+                    "Second B follows the existing selected-row loop without changing its bounds or elapsed audio");
             resetEightButtons();
 
             for(bool releaseBFirst:{false,true})for(Button command:{Button::Select,Button::Start}) {

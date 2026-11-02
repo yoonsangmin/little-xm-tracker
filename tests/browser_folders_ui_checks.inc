@@ -1,8 +1,9 @@
         {
-            // Every dialog starts from its portable category; directory browsing
+            // Every dialog starts from its configured category; directory browsing
             // and cancel releases must not edit music or overwrite a clipboard.
             playback->stop();playback->stopPreview();mode=Mode::Normal;held.fill(false);
             const auto savedHome=home,savedContentDirectory=contentDirectory;
+            const auto savedBrowserFolders=browserFolders;
             const auto savedBrowserDirectory=browserDirectory,savedCurrentFile=currentFile;
             const auto savedPage=page;
             const auto savedClipboard=clipboard;
@@ -14,12 +15,18 @@
             const auto beforeFolderSerial=recoverySerial;const bool beforeFolderDirty=dirty;
             const auto folderQa=home/("browser-folders-"+std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
             home=folderQa/"settings";contentDirectory=folderQa/"portable-app";
-            std::filesystem::create_directories(home);
+            browserFolders={};browserFolderPicker=-1;
+            std::filesystem::create_directories(home);std::filesystem::create_directories(contentDirectory);
+            for(std::size_t category=0;category<3;++category)
+                require(browserDefaultFolder(category)==contentDirectory&&!std::filesystem::exists(browserConfiguredFolder(category)),
+                        "Missing packaged content folders fall back to the application root without being recreated");
+            // Packaging supplies these empty directories; runtime does not.
+            for(const char* category:{"songs","instruments","samples"})std::filesystem::create_directories(contentDirectory/category);
             const auto defaultSong=browserDefaultFolder(0),defaultInstrument=browserDefaultFolder(1),defaultSample=browserDefaultFolder(2);
             require(defaultSong==contentDirectory/"songs"&&defaultInstrument==contentDirectory/"instruments"&&
                     defaultSample==contentDirectory/"samples"&&std::filesystem::is_directory(defaultSong)&&
                     std::filesystem::is_directory(defaultInstrument)&&std::filesystem::is_directory(defaultSample),
-                    "Portable defaults create category folders beside the application, separate from settings");
+                    "Portable defaults use existing packaged category folders separately from settings");
             const auto historyPath=home/"browser-folders.txt";
             for(const auto action:{FileAction::OpenXm,FileAction::SaveXm,FileAction::RenderWav,
                                   FileAction::ImportXi,FileAction::ExportXi,
@@ -91,13 +98,89 @@
             io::writeFileAtomic(defaultInstrument,{'k','e','e','p'});
             require(browserDefaultFolder(1)==contentDirectory&&io::readFile(defaultInstrument)==std::vector<std::uint8_t>({'k','e','e','p'}),
                     "A file blocking a default folder is preserved and the dialog falls back to the portable root");
+
+            const auto configuredSong=folderQa/std::filesystem::u8path(u8"Songs \"mix\" 한글 space");
+            const auto configuredInstrument=folderQa/"Custom instruments",configuredSample=folderQa/"Custom samples";
+            browserFolders={configuredSong,configuredInstrument,configuredSample};
+            for(const auto& directory:browserFolders)std::filesystem::create_directories(directory);
+            const auto configuredFolders=browserFolders;
+            saveEditorSettings();browserFolders={};loadEditorSettings();
+            require(browserFolders==configuredFolders,
+                    "Default folder preferences round-trip absolute paths with spaces, Unicode and quoted characters");
+            for(const auto action:{FileAction::OpenXm,FileAction::SaveXm,FileAction::ImportXi,FileAction::ImportAudio}) {
+                openBrowser(action);
+                require(browserDirectory==configuredFolders[browserFolderCategory(action)],
+                        "Each file category uses its own explicitly configured default");
+                tap(Button::B);
+            }
+
+            const auto chosenFolder=configuredSong/"Picked subfolder";
+            std::filesystem::create_directory(chosenFolder);
+            io::writeFileAtomic(configuredSong/"ignored.xm",{'x'});
+            const auto folderPreferencesBeforeCancel=io::readFile(home/"editor-settings.txt");
+            menuParents.clear();openDefaultFolderSettings();noticeUntil=0;draw();screenshot(savedHome/"qa-default-folders.bmp");
+            require(mode==Mode::Menu&&menuTitle=="DEFAULT FOLDERS"&&actions.size()==3,
+                    "Default Folders exposes one setting for each file category");
+            menuIndex=0;tap(Button::A);
+            require(mode==Mode::Browser&&browserFolderPicker==0&&browserDirectory==configuredSong&&
+                    std::all_of(entries.begin(),entries.end(),[](const Entry& entry){return entry.directory;}),
+                    "A on Songs opens a directory-only picker at the configured default");
+            noticeUntil=0;draw();screenshot(savedHome/"qa-default-folder-picker.bmp");
+            enterDirectory(chosenFolder);tap(Button::Select);
+            require(mode==Mode::Browser&&browserDirectory==chosenFolder&&browserFolders==configuredFolders,
+                    "Folder-picker Select is unused and browsing does not change preferences");
+            tap(Button::B);
+            require(mode==Mode::Menu&&menuTitle=="DEFAULT FOLDERS"&&browserFolderPicker<0&&
+                    browserFolders==configuredFolders&&io::readFile(home/"editor-settings.txt")==folderPreferencesBeforeCancel&&
+                    blockSelected&&!blockClipboard&&clipboard&&clipboard->note==12,
+                    "Cancel returns to Default Folders without saving or copying the underlying Pattern selection");
+            tap(Button::A);enterDirectory(chosenFolder);tap(Button::Start);
+            require(mode==Mode::Menu&&menuTitle=="DEFAULT FOLDERS"&&browserFolderPicker<0&&
+                    browserFolders[0]==chosenFolder&&browserFolders[1]==configuredInstrument&&browserFolders[2]==configuredSample&&
+                    !playback->status().playing&&blockSelected&&!blockClipboard&&clipboard&&clipboard->note==12,
+                    "Picker Start saves only the chosen category without playing music or leaking a button release");
+            const auto acceptedFolders=browserFolders;
+            browserFolders={};loadEditorSettings();
+            require(browserFolders==acceptedFolders,"The accepted directory survives preference reload");
+            openBrowser(FileAction::SaveXm);
+            require(browserDirectory==chosenFolder&&currentFile==savedCurrentFile,
+                    "Save As uses the configured song folder without changing the current SAVE target");
+            tap(Button::B);
+
+            const auto unavailable=folderQa/"unavailable-drive"/"songs";
+            browserFolders[0]=unavailable;
+            require(browserDefaultFolder(0)==contentDirectory&&browserConfiguredFolder(0)==unavailable&&!std::filesystem::exists(unavailable),
+                    "Unavailable configured locations retain their preference but fall back without creating a path");
+            browserFolders[1]=defaultInstrument;
+            require(browserDefaultFolder(1)==contentDirectory&&io::readFile(defaultInstrument)==std::vector<std::uint8_t>({'k','e','e','p'}),
+                    "A configured path blocked by a file is preserved and safely falls back");
+            browserFolders=acceptedFolders;
+            const std::string malformedFolders="song_folder \"relative/path\"\ninstrument_folder unquoted\nsample_folder \"unterminated\n";
+            io::writeFileAtomic(home/"editor-settings.txt",std::vector<std::uint8_t>(malformedFolders.begin(),malformedFolders.end()));
+            loadEditorSettings();
+            require(browserFolders==acceptedFolders,"Malformed, relative and unquoted folder preferences cannot replace valid defaults");
+            saveEditorSettings();
+
+            const auto workingSettingsHome=home;
+            const auto blockedSettingsHome=folderQa/"blocked-settings";
+            io::writeFileAtomic(blockedSettingsHome,{'k','e','e','p'});
+            openDefaultFolderSettings();openFolderPicker(0);enterDirectory(configuredSong);
+            home=blockedSettingsHome;bool folderSaveFailed=false;
+            try {tap(Button::Start);}catch(const std::exception&){folderSaveFailed=true;buttonInput(Button::Start,false);}
+            home=workingSettingsHome;
+            require(folderSaveFailed&&browserFolders==acceptedFolders&&mode==Mode::Browser&&browserFolderPicker==0&&
+                    io::readFile(blockedSettingsHome)==std::vector<std::uint8_t>({'k','e','e','p'}),
+                    "A preference write failure preserves the prior directory and leaves the picker available");
+            tap(Button::B);
+
             require(io::readFile(historyPath)==historySentinel,"Legacy folder history is ignored and left untouched");
             require(io::encodeXm(doc)==beforeFolderDocument&&currentFile==savedCurrentFile&&
                     undoStack.size()==beforeFolderUndo&&redoStack.size()==beforeFolderRedo&&
                     recoverySerial==beforeFolderSerial&&dirty==beforeFolderDirty,
                     "Default folders, paging, cancellation and fallback never change the song or history");
             home=savedHome;contentDirectory=savedContentDirectory;browserDirectory=savedBrowserDirectory;page=savedPage;
+            browserFolders=savedBrowserFolders;browserFolderPicker=-1;
             clipboard=savedClipboard;blockClipboard=savedBlockClipboard;
             blockSelected=savedBlockSelected;blockRow=savedBlockRow;blockChannel=savedBlockChannel;blockPattern=savedBlockPattern;
-            mode=Mode::Normal;held.fill(false);selectPending=false;modalBackHeld=false;
+            mode=Mode::Normal;held.fill(false);selectPending=false;modalBackHeld=false;menuParents.clear();
         }

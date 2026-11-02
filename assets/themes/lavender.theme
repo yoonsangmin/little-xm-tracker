@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Lavender
+background #181924
+panel #242638
+highlight #343750
+text #F1EFFB
+secondary_text #ABAEC8
+dim_text #626985
+accent #BEC5FF
+cursor #FFE2A8
+volume #A8DBBF
+warning #FFB0BC
+selection #3D4060
+sample_selection #353D52
+overlay #0B0C16

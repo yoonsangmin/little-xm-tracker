@@ -78,6 +78,18 @@
             tap(Button::Down);tap(Button::A);
             require(doc.orders==std::vector<std::uint8_t>({0xff,0xff}),"automatic append clamps at FF without wrapping or clearing the pattern");
             undo();require(io::encodeXm(doc)==beforeLastPatternAppend,"one Undo restores the song before an automatic append");
+            doc.orders.assign(20,0);order=0;songOrderColumn=1;normalize();playback->load(doc);
+            const auto beforeOrderPaging=io::encodeXm(doc);const auto pagingUndoCount=undoStack.size();
+            optionChord(Button::Down);
+            require(order==9&&songOrderColumn==1&&!songAppendOrder,"Song B+Down advances a visible Order page and retains ROWS focus");
+            optionChord(Button::Left);optionChord(Button::Right);
+            require(order==9&&songOrderColumn==1,"Song B+Left/Right no longer moves Orders or changes columns");
+            buttonInput(Button::B,true);tap(Button::Down);tap(Button::Down);tap(Button::Down);buttonInput(Button::B,false);
+            require(songOrderCursor()==20&&songAppendOrder&&songField==0&&doc.orders.size()==20,
+                    "Held-B page movement clamps at the append row without adding Orders or entering the monitor");
+            optionChord(Button::Up);optionChord(Button::Up);optionChord(Button::Up);
+            require(order==0&&!songAppendOrder&&io::encodeXm(doc)==beforeOrderPaging&&undoStack.size()==pagingUndoCount,
+                    "Upward Order paging clamps at zero and never edits the song or history");
             doc.orders.assign(256,0);order=255;normalize();playback->load(doc);
             tap(Button::Down);optionChord(Button::Down);
             require(order==255&&!songAppendOrder&&doc.orders.size()==256,"a full order list exposes no append slot beyond FF");

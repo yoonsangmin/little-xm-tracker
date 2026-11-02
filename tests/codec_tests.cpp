@@ -78,6 +78,15 @@ Bytes legacyXm(std::uint16_t version) {
     b.insert(b.end(), modern.begin() + 694, modern.end());
     return b;
 }
+
+// Remove only unused order bytes from a full independent XM fixture. The
+// following pattern/instrument bytes move with the declared header boundary.
+Bytes compactXmHeader(Bytes bytes, std::size_t storedOrders) {
+    check(storedOrders <= 256, "Invalid compact fixture order count");
+    bytes.erase(bytes.begin() + 80 + storedOrders, bytes.begin() + 336);
+    patch32(bytes, 60, static_cast<std::uint32_t>(20 + storedOrders));
+    return bytes;
+}
 } // namespace
 
 int main() {
@@ -119,6 +128,160 @@ int main() {
         maximumRows[58] = 2; maximumRows[72] = 0;
         dword(maximumRows, 8); byte(maximumRows, 0); byte(maximumRows, 255); word(maximumRows, 0);
         check(brick::io::decodeXm(maximumRows).patterns[0].rows == 256, "XM 1.02 byte row count did not preserve 256 rows");
+    });
+
+    test("compact XM song header keeps active orders and following data", [] {
+        for (const std::size_t count : {std::size_t(1), std::size_t(39), std::size_t(256)}) {
+            auto full = referenceXm();
+            full[64] = static_cast<std::uint8_t>(count);
+            full[65] = static_cast<std::uint8_t>(count >> 8);
+            full[66] = static_cast<std::uint8_t>(count - 1);
+            full[67] = 0;
+            // Unused order slots are not extension metadata and need not be zero.
+            for (std::size_t i = count; i < 256; ++i) full[80 + i] = 0xA5;
+            const auto normalized = brick::io::encodeXm(brick::io::decodeXm(full));
+            const auto paddedCount = count < 249 ? count + 7 : 256;
+            for (const auto stored : {count, paddedCount, std::size_t(256)}) {
+                const auto compact = compactXmHeader(full, stored);
+                const auto loaded = brick::io::decodeXm(compact);
+                check(loaded.orders.size() == count && loaded.restart == count - 1,
+                      "Compact header lost active orders or the restart position");
+                check(brick::io::encodeXm(loaded) == normalized,
+                      "Compact song header misaligned patterns, instruments or PCM");
+            }
+        }
+        for (const std::uint16_t version : {std::uint16_t(0x0102), std::uint16_t(0x0103)}) {
+            const auto full = legacyXm(version);
+            const auto compact = compactXmHeader(full, 1);
+            check(brick::io::encodeXm(brick::io::decodeXm(compact)) ==
+                  brick::io::encodeXm(brick::io::decodeXm(full)),
+                  "Compact legacy header changed instrument/pattern/PCM ordering");
+        }
+    });
+
+    test("compact XM header still rejects missing fields and extension data", [] {
+        auto missingOrder = referenceXm();
+        missingOrder[64] = 39;
+        missingOrder = compactXmHeader(missingOrder, 38);
+        rejects([&] { brick::io::decodeXm(missingOrder); },
+                "Compact header borrowed the first pattern byte as a missing active order");
+        const auto noOrders = compactXmHeader(referenceXm(), 0);
+        rejects([&] { brick::io::decodeXm(noOrders); }, "Header with no active order bytes accepted");
+        for (const std::uint32_t length : {0u, 3u, 4u, 19u}) {
+            auto bytes = referenceXm(); patch32(bytes, 60, length);
+            rejects([&] { brick::io::decodeXm(bytes); }, "Header shorter than fixed song fields accepted");
+        }
+        const auto compact = compactXmHeader(referenceXm(), 1);
+        for (std::size_t length = 0; length < compact.size(); ++length)
+            rejects([&] { brick::io::decodeXm(Bytes(compact.begin(), compact.begin() + length)); },
+                    "Truncated compact-header XM accepted");
+        auto declaredTooLong = referenceXm();
+        patch32(declaredTooLong, 60, static_cast<std::uint32_t>(declaredTooLong.size()));
+        rejects([&] { brick::io::decodeXm(declaredTooLong); }, "Header longer than remaining file accepted");
+        auto extended = referenceXm();
+        extended.insert(extended.begin() + 336, 4, 0);
+        patch32(extended, 60, 280);
+        check(brick::io::encodeXm(brick::io::decodeXm(extended)) ==
+              brick::io::encodeXm(brick::io::decodeXm(referenceXm())),
+              "Zero-padded extended song header changed following data");
+        extended[336] = 1;
+        rejects([&] { brick::io::decodeXm(extended); }, "Unknown nonzero song-header extension accepted");
+    });
+
+    test("known OpenMPT XM trailer chunks preserve standard song data", [] {
+        const auto plain = referenceXm();
+        const auto normalized = brick::io::encodeXm(brick::io::decodeXm(plain));
+        for (const auto* tag : {"text", "MIDI", "PNAM", "CNAM"}) {
+            auto bytes = compactXmHeader(plain, 1);
+            fixed(bytes, tag, 4); dword(bytes, 3);
+            bytes.insert(bytes.end(), {0x61, 0, 0xFF});
+            brick::io::XmImportInfo info;
+            const auto loaded = brick::io::decodeXm(bytes, &info);
+            check(info.ignoredOpenMptExtensions, "OpenMPT chunk omission was not reported");
+            check(brick::io::encodeXm(loaded) == normalized,
+                  "OpenMPT trailer changed standard orders, patterns, instruments or PCM");
+            check(brick::io::encodeXm(brick::io::decodeXm(bytes)) == normalized,
+                  "OpenMPT import requires an optional information object");
+            brick::io::decodeXm(plain, &info);
+            check(!info.ignoredOpenMptExtensions, "Plain XM import retained a previous extension warning");
+        }
+        auto combined = plain;
+        for (const auto* tag : {"text", "MIDI", "PNAM", "CNAM"}) {
+            fixed(combined, tag, 4); dword(combined, 0);
+        }
+        brick::io::XmImportInfo info;
+        check(brick::io::encodeXm(brick::io::decodeXm(combined, &info)) == normalized &&
+              info.ignoredOpenMptExtensions, "Consecutive empty known chunks were not bounded correctly");
+    });
+
+    test("OpenMPT instrument and song properties respect their different strides", [] {
+        auto document = brick::io::decodeXm(referenceXm());
+        document.instruments.push_back(document.instruments.front());
+        document.instruments.emplace_back(); // Sampleless instruments still occupy a property slot.
+        const auto plain = brick::io::encodeXm(document);
+        auto bytes = plain;
+        fixed(bytes, "text", 4); dword(bytes, 4); fixed(bytes, "NOTE", 4);
+        // MPTX/MPTS identifiers are stored reversed on disk.
+        fixed(bytes, "XTPM", 4);
+        fixed(bytes, "dF..", 4); word(bytes, 2);
+        bytes.insert(bytes.end(), {1, 2, 3, 4, 5, 6}); // Two bytes for each of three instruments.
+        fixed(bytes, "VR..", 4); word(bytes, 1);
+        bytes.insert(bytes.end(), {7, 8, 9});
+        fixed(bytes, "STPM", 4);
+        fixed(bytes, "DT..", 4); word(bytes, 2); word(bytes, 120); // One song, not three instruments.
+        fixed(bytes, "LSWV", 4); word(bytes, 4); dword(bytes, 0x01180200);
+        brick::io::XmImportInfo info;
+        const auto loaded = brick::io::decodeXm(bytes, &info);
+        check(info.ignoredOpenMptExtensions && brick::io::encodeXm(loaded) == plain,
+              "OpenMPT property records misaligned or changed standard XM content");
+        check(loaded.instruments.size() == 3 && loaded.instruments[2].samples.empty(),
+              "Property parsing changed the sampleless instrument slot");
+    });
+
+    test("malformed or unknown top-level XM trailers remain rejected", [] {
+        const auto plain = referenceXm();
+        const auto rejectsTrailer = [&](const Bytes& trailer) {
+            auto bytes = plain; bytes.insert(bytes.end(), trailer.begin(), trailer.end());
+            brick::io::XmImportInfo info; info.ignoredOpenMptExtensions = true;
+            rejects([&] { brick::io::decodeXm(bytes, &info); }, "Malformed XM trailer accepted");
+            check(!info.ignoredOpenMptExtensions, "Failed import retained a stale extension warning");
+        };
+        rejectsTrailer({'t', 'e', 'x'});
+        for (const auto* tag : {"text", "MIDI", "PNAM", "CNAM"}) {
+            Bytes trailer; fixed(trailer, tag, 4);
+            rejectsTrailer(trailer);
+            word(trailer, 3); rejectsTrailer(trailer); // Partial 32-bit size.
+            trailer.resize(4); dword(trailer, 3);
+            trailer.insert(trailer.end(), {1, 2}); rejectsTrailer(trailer);
+            trailer.resize(4); dword(trailer, 0xFFFFFFFFu); rejectsTrailer(trailer);
+        }
+        Bytes unknown; fixed(unknown, "ABCD", 4); dword(unknown, 0); rejectsTrailer(unknown);
+        Bytes afterKnown; fixed(afterKnown, "text", 4); dword(afterKnown, 1); byte(afterKnown, 0);
+        afterKnown.insert(afterKnown.end(), unknown.begin(), unknown.end()); rejectsTrailer(afterKnown);
+    });
+
+    test("OpenMPT property trailers reject malformed identifiers and payload lengths", [] {
+        const auto plain = referenceXm();
+        const auto rejectsProperties = [&](const Bytes& properties) {
+            auto bytes = plain; fixed(bytes, "XTPM", 4);
+            bytes.insert(bytes.end(), properties.begin(), properties.end());
+            rejects([&] { brick::io::decodeXm(bytes); }, "Malformed OpenMPT properties accepted");
+        };
+        rejectsProperties({'A', 'B'});
+        Bytes property; fixed(property, "dF..", 4); rejectsProperties(property);
+        byte(property, 2); rejectsProperties(property); // Partial 16-bit size.
+        property.resize(4); word(property, 2); byte(property, 1); rejectsProperties(property);
+        property = {'A', 0, 'B', 'C'}; word(property, 0); rejectsProperties(property);
+        property = {'A', 'B', 0x80, 'C'}; word(property, 0); rejectsProperties(property);
+        property.clear(); fixed(property, "STPM", 4); fixed(property, "DT..", 4); word(property, 4);
+        word(property, 120); rejectsProperties(property); // Truncated song payload.
+        auto document = brick::io::decodeXm(plain);
+        document.instruments.push_back(document.instruments.front());
+        document.instruments.emplace_back();
+        auto bytes = brick::io::encodeXm(document);
+        fixed(bytes, "XTPM", 4); fixed(bytes, "dF..", 4); word(bytes, 2);
+        bytes.insert(bytes.end(), {1, 2, 3, 4, 5}); // Six bytes are required.
+        rejects([&] { brick::io::decodeXm(bytes); }, "Truncated multi-instrument property accepted");
     });
 
     test("XM preservation and immutable serialization", [] {

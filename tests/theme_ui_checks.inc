@@ -23,7 +23,7 @@
             auto openThemeMenu=[&]{
                 menu("SETTINGS");
                 const auto item=std::find_if(actions.begin(),actions.end(),[](const Action& a){return a.label=="THEME COLORS";});
-                require(item!=actions.end()&&item+1==actions.end(),"Settings exposes Theme Colors as its last item");
+                require(item!=actions.end(),"Settings exposes Theme Colors alongside the other application settings");
                 const int target=int(std::distance(actions.begin(),item));
                 while(menuIndex<target)tap(Button::Down);
                 while(menuIndex>target)tap(Button::Up);
