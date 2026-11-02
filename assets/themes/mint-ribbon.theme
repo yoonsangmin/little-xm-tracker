@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Mint Ribbon
+background #ECFBF4
+panel #DBF1E8
+highlight #CBE9DE
+text #AD3471
+secondary_text #A85580
+dim_text #ABA5B8
+accent #A52D6D
+cursor #B9347B
+volume #3B7E74
+warning #AF514E
+selection #C4E2DD
+sample_selection #EFD7E6
+overlay #303F43

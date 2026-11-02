@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Cotton Candy
+background #EBF8FF
+panel #DDEFFC
+highlight #D0E7F8
+text #B13473
+secondary_text #B25183
+dim_text #BFA2BE
+accent #A82E6C
+cursor #BE387C
+volume #4D7A98
+warning #BD4C6C
+selection #C7DDF3
+sample_selection #F3D6E8
+overlay #34304B

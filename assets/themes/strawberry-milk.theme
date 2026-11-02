@@ -1,0 +1,15 @@
+LITTLE_XM_THEME 1
+# Strawberry Milk
+background #FFF8ED
+panel #FCEBDC
+highlight #F7DDDF
+text #B1346E
+secondary_text #AD5E82
+dim_text #C5A3AF
+accent #A83169
+cursor #B93271
+volume #7B659D
+warning #B04E42
+selection #F0CDD9
+sample_selection #EAD9ED
+overlay #452B3C

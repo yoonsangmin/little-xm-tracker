@@ -34,7 +34,7 @@ Files and updates
 -----------------
 Put XM songs in songs, XI instruments in instruments, and sample audio in samples.
 userdata holds two recovery autosaves and application settings.
-themes holds shared .theme files and 28 bundled presets.
+themes holds shared .theme files and 31 bundled presets.
 The ZIP includes these five folders empty, with no user files or root gamecontrollerdb.txt.
 On launch, userdata and themes are created if needed. Missing theme presets and
 the editable root gamecontrollerdb.txt are copied from assets. Existing files,
