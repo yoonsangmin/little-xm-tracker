@@ -10,11 +10,18 @@ struct FrameRange { std::size_t first = 0, last = 0; };
 FrameRange wholeSample(const Sample& sample);
 enum class SampleTransform { Reverse, Normalize, FadeIn, FadeOut, Gain, Silence, Invert, RemoveDc };
 void transformSample(Sample& sample, FrameRange range, SampleTransform operation, double gain = 1.0);
-struct PcmClip { std::vector<std::int16_t> pcm; bool sixteenBit = true; };
+struct PcmClip {
+    std::vector<std::int16_t> pcm;
+    bool sixteenBit = true;
+    std::int8_t relativeNote = 0, finetune = 0;
+};
 PcmClip copyPcm(const Sample& sample, FrameRange range);
 // Replaces the selected range, or inserts at first when first == last.
+// Aligns clipboard PCM to the destination tuning to retain pitch and duration
+// at the same trigger note. Equal tuning copies PCM exactly. Returns the actual
+// inserted frame count, which can differ from the clipboard's length.
 // Pasting higher precision PCM promotes an 8-bit destination to 16-bit.
-void pastePcm(Sample& sample, FrameRange replaced, const PcmClip& clip);
+std::size_t pastePcm(Sample& sample, FrameRange replaced, const PcmClip& clip);
 void deletePcm(Sample& sample, FrameRange range);
 void trimPcm(Sample& sample, FrameRange range);
 void convertSampleDepth(Sample& sample, bool sixteenBit);

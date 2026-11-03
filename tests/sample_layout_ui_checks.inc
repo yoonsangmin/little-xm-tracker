@@ -35,6 +35,16 @@
                     tap(columns[std::size_t(sampleField)]<columns[std::size_t(target)]?Button::Right:Button::Left);
                 require(sampleField==target,"Sample directions select the requested item within its row");
             };
+            auto activateSampleProcess=[&](const char* label){
+                focusSampleLayout(14);tap(Button::A);
+                const auto action=std::find_if(actions.begin(),actions.end(),[&](const Action& entry){return entry.label==label;});
+                require(mode==Mode::Menu&&menuTitle=="SAMPLE PROCESS"&&action!=actions.end(),
+                        "The requested PCM operation is available through the visible PROCESS button");
+                const int index=int(std::distance(actions.begin(),action));
+                while(menuIndex<index)tap(Button::Down);
+                while(menuIndex>index)tap(Button::Up);
+                tap(Button::A);
+            };
 
             resetSampleLayout();selectionStart=200;selectionEnd=600;
             const auto layoutBefore=io::encodeXm(doc);const auto layoutRevision=documentRevision,layoutRecovery=recoverySerial;
@@ -82,14 +92,19 @@
             require(selectionStart==201&&selectionEnd==600,"Selection START changes by one frame while preserving END");
             focusSampleLayout(8);chord({Button::Up});
             require(selectionStart==201&&selectionEnd==610,"Selection END coarse edit uses one percent of sample length");
-            selectionStart=200;selectionEnd=204;focusSampleLayout(7);chord({Button::Up});
-            require(selectionStart==203&&selectionEnd==204,"An active selection START cannot cross END or empty the range");
+            selectionStart=200;selectionEnd=204;clearSelection();selectChord(Button::B);focusSampleLayout(7);chord({Button::Up});
+            require(selectionStart==204&&selectionEnd==204&&!pcmSelecting&&pcmSelectStage==0&&!hasSelection(),
+                    "START meeting END becomes an insertion point and clears active Select+B selection state without crossing it");
             focusSampleLayout(8);chord({Button::Down});
-            require(selectionStart==203&&selectionEnd==204,"An active selection END clamps one frame after START");
+            require(selectionStart==204&&selectionEnd==204,"A collapsed selection END cannot cross START");
+            selectionStart=200;selectionEnd=204;chord({Button::Down});
+            require(selectionStart==200&&selectionEnd==200,"An active selection END can meet START to become an insertion point");
             selectionStart=selectionEnd=0;clearSelection();focusSampleLayout(7);chord({Button::Up});
-            require(selectionStart==10&&selectionEnd==11,"Editing START on an empty selection creates a one-frame range");
+            require(selectionStart==10&&selectionEnd==10,"Editing collapsed START moves both endpoints together without replacing a frame");
             selectionStart=selectionEnd=1024;focusSampleLayout(8);chord({Button::Left});
-            require(selectionStart==1023&&selectionEnd==1024,"Editing END at the sample boundary creates a valid final-frame range");
+            require(selectionStart==1024&&selectionEnd==1024,"Collapsed END at the sample boundary remains a valid append position");
+            focusSampleLayout(7);chord({Button::Left,Button::Right,Button::Right});
+            require(selectionStart==1024&&selectionEnd==1024,"Collapsed START moves away from and back to the final boundary, clamping at sample length");
             require(io::encodeXm(doc)==layoutBefore&&undoStack.empty()&&!dirty&&documentRevision==layoutRevision&&recoverySerial==layoutRecovery,
                     "Selection endpoint edits never modify XM data, history or recovery state");
 
@@ -216,6 +231,104 @@
                     currentSample()->sixteenBit&&pcmClipboard->pcm==std::vector<std::int16_t>({768,-512,256}),
                     "PROCESS Paste replaces only the selected PCM range, preserving destination precision and the clipboard");
             undo();require(io::encodeXm(doc)==beforeProcessPaste,"One Undo restores PCM and loop metadata after PROCESS Paste");
+
+            // Use only visible controls to move a cut range into another sample
+            // without replacing its destination frames.
+            resetSampleLayout();
+            const auto insertionSource=currentSample()->pcm;
+            Sample insertionTarget=*currentSample();insertionTarget.name="INSERT DESTINATION";
+            insertionTarget.pcm.resize(64);insertionTarget.loopStart=20;insertionTarget.loopLength=20;
+            for(std::size_t n=0;n<insertionTarget.pcm.size();++n)insertionTarget.pcm[n]=std::int16_t(1000+int(n)*50);
+            const auto insertionDestination=insertionTarget.pcm;
+            doc.instruments[0].samples.resize(1);doc.instruments[0].samples.push_back(insertionTarget);playback->load(doc);
+            const auto beforeCrossSampleCut=io::encodeXm(doc);
+            const std::vector<std::int16_t> insertionClip(insertionSource.begin()+200,insertionSource.begin()+204);
+            selectionStart=200;selectionEnd=204;activateSampleProcess("CUT PCM");
+            const auto cutSource=currentSample()->pcm;const auto afterCrossSampleCut=io::encodeXm(doc);
+            require(undoStack.size()==1&&pcmClipboard&&pcmClipboard->pcm==insertionClip,
+                    "Source CUT PCM copies its exact range and creates one undoable removal");
+            optionChord(Button::Down);
+            require(sample==1&&selectionStart==0&&selectionEnd==0&&pcmClipboard&&pcmClipboard->pcm==insertionClip,
+                    "B+Down changes destination sample while retaining the cut PCM clipboard");
+            focusSampleLayout(7);
+            buttonInput(Button::A,true);for(int n=0;n<12;++n)tap(Button::Right);buttonInput(Button::A,false);
+            require(selectionStart==12&&selectionEnd==12&&!hasSelection()&&io::encodeXm(doc)==afterCrossSampleCut,
+                    "START directions reach a middle insertion point without selecting or editing destination PCM");
+            noticeUntil=0;draw();screenshot(home/"sample-insertion-point.bmp");SDL_RenderPresent(renderer);
+            activateSampleProcess("PASTE PCM");
+            std::vector<std::int16_t> middleInserted(insertionDestination.begin(),insertionDestination.begin()+12);
+            middleInserted.insert(middleInserted.end(),insertionClip.begin(),insertionClip.end());
+            middleInserted.insert(middleInserted.end(),insertionDestination.begin()+12,insertionDestination.end());
+            require(currentSample()->pcm==middleInserted&&currentSample()->pcm.size()==68&&
+                    currentSample()->loopStart==24&&currentSample()->loopLength==20&&
+                    doc.instruments[0].samples[0].pcm==cutSource&&pcmClipboard->pcm==insertionClip&&
+                    undoStack.size()==2&&undoStack.back().label=="PASTE",
+                    "Middle Paste inserts the entire clipboard, retains both destination sides and source cut, and relocates the destination loop as one edit");
+            noticeUntil=0;draw();screenshot(home/"sample-insertion-result.bmp");SDL_RenderPresent(renderer);
+            undo();require(io::encodeXm(doc)==afterCrossSampleCut&&undoStack.size()==1,
+                    "One Undo reverses only the destination insertion, including its loop markers");
+            undo();require(io::encodeXm(doc)==beforeCrossSampleCut&&undoStack.empty()&&pcmClipboard->pcm==insertionClip,
+                    "The next Undo restores the source cut without losing the PCM clipboard");
+            for(int boundary:{0,64}) {
+                clearSelection();selectionStart=selectionEnd=0;sample=1;focusSampleLayout(7);
+                if(boundary){buttonInput(Button::A,true);for(int n=0;n<65;++n)tap(Button::Right);buttonInput(Button::A,false);}
+                else chord({Button::Left});
+                require(selectionStart==boundary&&selectionEnd==boundary,"Collapsed START reaches and clamps at either insertion boundary");
+                activateSampleProcess("PASTE PCM");
+                auto boundaryInserted=insertionDestination;
+                boundaryInserted.insert(boundaryInserted.begin()+boundary,insertionClip.begin(),insertionClip.end());
+                require(currentSample()->pcm==boundaryInserted&&currentSample()->pcm.size()==68&&
+                        currentSample()->loopStart==std::uint32_t(boundary?20:24)&&currentSample()->loopLength==20&&
+                        doc.instruments[0].samples[0].pcm==insertionSource&&pcmClipboard->pcm==insertionClip&&undoStack.size()==1,
+                        "Paste at start or sample length preserves every destination frame, the original source and clipboard with valid loop relocation");
+                undo();require(io::encodeXm(doc)==beforeCrossSampleCut&&undoStack.empty(),
+                        "Boundary insertion has one complete Undo including loop metadata");
+            }
+
+            // Clipboard tuning travels with a cut range; the destination keeps
+            // its tuning and highlights the converted, rather than source, span.
+            resetSampleLayout();
+            currentSample()->relativeNote=-3;currentSample()->finetune=37;
+            std::fill(currentSample()->pcm.begin()+200,currentSample()->pcm.begin()+232,std::int16_t{4096});
+            Sample tunedTarget=*currentSample();tunedTarget.name="TUNED DESTINATION";
+            tunedTarget.pcm.resize(64);tunedTarget.relativeNote=9;tunedTarget.loopStart=20;tunedTarget.loopLength=20;
+            tunedTarget.volume=39;tunedTarget.panning=61;
+            Sample originalTuneTarget=tunedTarget;originalTuneTarget.relativeNote=-3;
+            const auto tunedDestination=tunedTarget.pcm;
+            doc.instruments[0].samples.resize(1);doc.instruments[0].samples.push_back(tunedTarget);
+            doc.instruments[0].samples.push_back(originalTuneTarget);playback->load(doc);
+            const auto beforeTunedCut=io::encodeXm(doc);
+            selectionStart=200;selectionEnd=232;activateSampleProcess("CUT PCM");
+            const auto afterTunedCut=io::encodeXm(doc);
+            require(pcmClipboard&&pcmClipboard->pcm==std::vector<std::int16_t>(32,4096)&&
+                    pcmClipboard->relativeNote==-3&&pcmClipboard->finetune==37,
+                    "CUT PCM retains source coarse and fine tuning alongside the original frame data");
+            optionChord(Button::Down);focusSampleLayout(7);
+            buttonInput(Button::A,true);for(int n=0;n<12;++n)tap(Button::Right);buttonInput(Button::A,false);
+            activateSampleProcess("PASTE PCM");
+            auto expectedTunedInsert=tunedDestination;
+            expectedTunedInsert.insert(expectedTunedInsert.begin()+12,64,std::int16_t{4096});
+            require(mode==Mode::Normal&&currentSample()->pcm==expectedTunedInsert&&selectionStart==12&&selectionEnd==76&&
+                    currentSample()->relativeNote==9&&currentSample()->finetune==37&&currentSample()->volume==39&&
+                    currentSample()->panning==61&&currentSample()->name=="TUNED DESTINATION"&&
+                    currentSample()->loopStart==84&&currentSample()->loopLength==20&&undoStack.size()==2&&
+                    undoStack.back().label=="PASTE"&&pcmClipboard->pcm==std::vector<std::int16_t>(32,4096)&&
+                    pcmClipboard->relativeNote==-3&&pcmClipboard->finetune==37,
+                    "PROCESS Paste doubles frames for an octave-higher destination, selects the converted span, relocates its loop and preserves metadata and clipboard");
+            const auto afterTunedPaste=io::encodeXm(doc);
+            undo();require(io::encodeXm(doc)==afterTunedCut&&undoStack.size()==1,
+                    "Undo restores the complete destination before tuning-aligned paste while retaining the source cut");
+            undo(true);require(io::encodeXm(doc)==afterTunedPaste&&undoStack.size()==2,
+                    "Redo restores exactly the converted PCM and relocated loop without resampling again");
+            optionChord(Button::Down);activateSampleProcess("PASTE PCM");
+            auto expectedOriginalTuneInsert=tunedDestination;
+            expectedOriginalTuneInsert.insert(expectedOriginalTuneInsert.begin(),32,std::int16_t{4096});
+            require(sample==2&&currentSample()->pcm==expectedOriginalTuneInsert&&selectionStart==0&&selectionEnd==32&&
+                    currentSample()->relativeNote==-3&&currentSample()->finetune==37&&undoStack.size()==3&&
+                    pcmClipboard->pcm==std::vector<std::int16_t>(32,4096),
+                    "Reusing the clipboard at its original tuning inserts its original frame count with no accumulated conversion");
+            undo();undo();undo();require(io::encodeXm(doc)==beforeTunedCut&&undoStack.empty(),
+                    "Independent Undos restore both tuned destinations and the source cut exactly");
 
             for(int resetField=0;resetField<=6;++resetField) {
                 resetSampleLayout();selectionStart=200;selectionEnd=600;

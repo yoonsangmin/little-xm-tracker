@@ -1,4 +1,4 @@
-Little XM Tracker 0.9.1
+Little XM Tracker 1.0.0
 
 Application code, original ASCII bitmap font, and demo PCM data are original to this project
 and distributed under the BSD 3-Clause license in LICENSE.

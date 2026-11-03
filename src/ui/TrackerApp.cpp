@@ -893,11 +893,15 @@ struct TrackerApp::Impl {
                 const auto movedFrame=[&](int value,int low,int high){return int(std::clamp<std::int64_t>(std::int64_t(value)+frameDelta,low,high));};
                 if(sampleField==7||sampleField==8){
                     const bool selected=selectionEnd>selectionStart;
-                    selectionStart=std::clamp(selectionStart,0,length-1);
+                    selectionStart=std::clamp(selectionStart,0,length);
+                    selectionEnd=std::clamp(selectionEnd,selectionStart,length);
                     if(sampleField==7){
-                        selectionStart=movedFrame(selectionStart,0,selected?selectionEnd-1:length-1);
-                        if(!selected)selectionEnd=selectionStart+1;
-                    } else selectionEnd=movedFrame(selectionEnd,selectionStart+1,length);
+                        selectionStart=movedFrame(selectionStart,0,selected?selectionEnd:length);
+                        // A collapsed selection is an insertion point. START
+                        // moves it; END opens a range without changing START.
+                        if(!selected)selectionEnd=selectionStart;
+                    } else selectionEnd=movedFrame(selectionEnd,selectionStart,length);
+                    if(selectionStart==selectionEnd){pcmSelecting=false;pcmSelectStage=0;}
                     rememberSampleFocus();return;
                 }
                 beginGesture();
@@ -1218,7 +1222,7 @@ struct TrackerApp::Impl {
         txt(34,52+controlTextY,"NAME",sampleField==9?amber:muted);
         txt(112,52+controlTextY,s?ui::fit(text::xmDisplayText(s->name),52):"EMPTY SAMPLE",sampleField==9?amber:ink);
         drawButton(760,52,118,"LOAD",sampleField==10);
-        drawButton(886,52,118,"NEW WAVE",sampleField==11);
+        drawButton(886,52,118,"GENERATE",sampleField==11);
         Sample empty;if(!s)s=&empty;
         const int x=30,y=103,ww=964,hh=284;rect(20,96,984,302,panel);
         line(x,y+hh/2,x+ww,y+hh/2,dim);
@@ -1258,7 +1262,14 @@ struct TrackerApp::Impl {
                 }
             };
             auto loopMarkers=[&]{if(s->loopLength&&(s->loopType||loopFocus))markers(s->loopStart,std::uint64_t(s->loopStart)+s->loopLength,loopFocus,5,6);};
-            auto selectionMarkers=[&]{if(selectionEnd>selectionStart)markers(selectionStart,selectionEnd,selectionFocus,7,8);};
+            auto selectionMarkers=[&]{
+                if(selectionEnd>selectionStart)markers(selectionStart,selectionEnd,selectionFocus,7,8);
+                else if(selectionFocus||selectionStart>0) {
+                    const int px=frameX(selectionStart);const auto color=selectionFocus?amber:dim;
+                    line(px,y,px,y+hh,color);
+                    if(selectionFocus)rect(px-2,y,5,5,color);
+                }
+            };
             // Keep the range currently being edited visible when boundaries overlap.
             if(loopFocus){selectionMarkers();loopMarkers();}else{loopMarkers();selectionMarkers();}
             const auto preview=playback->samplePreviewStatus();
@@ -1270,7 +1281,7 @@ struct TrackerApp::Impl {
             }
         }
         txt(30,410,number(int(s->pcm.size()))+" FRAMES  /  "+(s->sixteenBit?"16-BIT":"8-BIT")+" MONO",muted);
-        txt(800,410,waveformZoom?"SELECTION":"FULL SAMPLE",muted);
+        txt(800,410,waveformZoom&&selectionEnd>selectionStart?"SELECTION":"FULL SAMPLE",muted);
         const char* loopNames[]={"OFF","FORWARD","PING-PONG"};
         labelValue(20,440,"VOLUME",hex(s->volume),sampleField==0,487);
         labelValue(517,440,"PANNING",hex(s->panning),sampleField==1,487);

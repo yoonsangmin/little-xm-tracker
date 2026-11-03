@@ -1,4 +1,4 @@
-Little XM Tracker 0.9.1 - TrimUI Brick / KNULLI
+Little XM Tracker 1.0.0 - TrimUI Brick / KNULLI
 ================================
 
 Installation
@@ -73,11 +73,20 @@ In Song/PCM: range > all > cancel. Canceling a selection does not copy it.
 For selected pattern notes, A+Left/Right transposes by a semitone; A+Up/Down by an octave.
 In Sample, directions always move focus. Select+B focuses selection END; edit
 START/END with A+Left/Right by one frame or A+Up/Down by 1% of sample length.
-END excludes that frame. Moving one endpoint keeps the other fixed.
+END excludes that frame. Endpoints cannot cross; LOOP keeps at least one frame.
+SELECTION START=END is an insertion point. Edit START to move both endpoints
+from 0 through the sample's end; edit END to extend the range or shrink it back to START.
+Otherwise, moving one endpoint keeps the other fixed.
 B copies the selected PCM; Select cancels. A+B resets the focused numeric field.
 Use PROCESS > CUT PCM / PASTE PCM for audio editing. Select+A is unused in SAMPLE.
+CUT PCM copies and removes the range. PASTE PCM replaces a selection or inserts
+at START=END, shifting later audio forward. Paste matches the destination tuning
+to keep pitch and playback duration at the same note; frame count may change.
+Equal tuning keeps PCM unchanged; paste never stretches audio to fit the range.
+To move audio between samples, CUT PCM, choose the destination
+with B+Up/Down, set START=END, move START to the insertion point, then PASTE PCM.
 Press A on PROCESS to open tools while keeping the range; no selection means
-the whole sample. PROCESS > LOOP FROM SELECTION makes a Forward loop.
+the whole sample, except paste. PROCESS > LOOP FROM SELECTION makes a Forward loop.
 
 While stopped, Select+Start from any main screen plays the whole song from Order 00, row 00.
 Start in SONG plays from the selected Order; in PATTERN it loops the pattern from row 00,
@@ -120,8 +129,8 @@ SAVE THEME exports the draft without applying it: choose NEW THEME... for a name
 or an existing file and confirm overwriting. To share, copy its .theme file into themes, then LOAD and APPLY.
 
 In SAMPLE's DRAW dialog, Left/Right moves between points from VALUE or EDIT POINTS.
-Use A+D-Pad on VALUE to change amplitude. In NEW WAVE, choose a waveform and FRAMES, then CREATE a draft.
-APPLY in DRAW commits it to the sample; B cancels.
+Use A+D-Pad on VALUE to change amplitude. In GENERATE, choose a waveform and FRAMES, then CREATE a draft.
+GENERATE replaces the whole sample, even with a selection. APPLY in DRAW commits it; B cancels.
 
 There is no in-app controller mapping. When porting to another device, edit gamecontrollerdb.txt
 using SDL2's mapping format. SDL calls the Select button back.

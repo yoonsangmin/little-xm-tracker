@@ -375,13 +375,15 @@
                 "Loop type - Off, forward or ping-pong", "Loop start - First sample frame to repeat",
                 "Loop end - First frame after the repeat range", "Selection start - First selected frame",
                 "Selection end - First frame after the selected range", "Name - Rename this sample",
-                "Load - Import audio", "New wave - Create a replacement sample; APPLY commits it",
+                "Load - Import audio", "Generate - Replace the whole sample; APPLY commits it",
                 "Draw - Edit the selected range, or the whole sample", "",
                 "Process - Open tools; keep the selected sample range"};
             context=meanings[std::clamp(sampleField,0,14)];
             if(sampleField>=5&&sampleField<=8) {
                 static const char* names[]={"Loop start","Loop end","Selection start","Selection end"};
-                context=std::string(names[sampleField-5])+" - A+DPAD edit / HOLD faster / A+B zero";
+                if(sampleField>=7&&selectionStart==selectionEnd)
+                    context="Insert at "+number(selectionStart)+" - A+DPAD edit / PROCESS > PASTE PCM";
+                else context=std::string(names[sampleField-5])+" - A+DPAD edit / HOLD faster / A+B zero";
             }
         }
         std::string detail;

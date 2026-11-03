@@ -1,7 +1,9 @@
 #include "io/Codec.hpp"
 #include "model/EditOperations.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -431,6 +433,191 @@ int main() {
         const auto original = sample.pcm;
         rejects([&] { transformSample(sample, {3, 4}, SampleTransform::Silence); }, "Out-of-range sample edit accepted");
         check(sample.pcm == original, "Rejected sample edit changed PCM");
+    });
+
+    test("PCM clipboard retains tuning and equivalent tuning pastes bit-exactly", [] {
+        using namespace brick::edit;
+        brick::Sample source;
+        source.pcm = {-32768, -1024, 0, 32512}; source.sixteenBit = false;
+        source.relativeNote = 1; source.finetune = 64;
+        const auto clip = copyPcm(source, {1, 4});
+        check(clip.relativeNote == 1 && clip.finetune == 64 && !clip.sixteenBit &&
+              clip.pcm == std::vector<std::int16_t>({-1024, 0, 32512}),
+              "Copy lost source tuning, precision or selected boundaries");
+        brick::Sample destination;
+        destination.pcm = {256, 512, 768}; destination.sixteenBit = false;
+        destination.relativeNote = 2; destination.finetune = -64;
+        pastePcm(destination, {1, 2}, clip);
+        check(destination.pcm == std::vector<std::int16_t>({256, -1024, 0, 32512, 768}) &&
+              !destination.sixteenBit && destination.relativeNote == 2 && destination.finetune == -64,
+              "Equivalent tuning resampled PCM or changed destination tuning");
+        check(source.pcm == std::vector<std::int16_t>({-32768, -1024, 0, 32512}) &&
+              clip.pcm == std::vector<std::int16_t>({-1024, 0, 32512}),
+              "Paste modified source sample or clipboard");
+    });
+
+    test("PCM tuning conversion relocates loops using inserted length", [] {
+        using namespace brick::edit;
+        brick::Sample source;
+        source.pcm.assign(8, 4096); source.relativeNote = -12; source.finetune = 23;
+        const auto clip = copyPcm(source, wholeSample(source));
+        brick::Sample destination;
+        destination.name = "Destination"; destination.pcm = {256, 512, 768, 1024, 1280, 1536};
+        destination.sixteenBit = false; destination.relativeNote = 0; destination.finetune = 23;
+        destination.volume = 37; destination.panning = 81;
+        setSampleLoop(destination, 2, 3, 2);
+        pastePcm(destination, {1, 2}, clip);
+        check(destination.pcm.size() == 21 && destination.pcm.front() == 256 &&
+              std::all_of(destination.pcm.begin() + 1, destination.pcm.begin() + 17,
+                          [](std::int16_t value) { return value == 4096; }) &&
+              std::vector<std::int16_t>(destination.pcm.begin() + 17, destination.pcm.end()) ==
+                  std::vector<std::int16_t>({768, 1024, 1280, 1536}),
+              "Converted replacement length or surrounding PCM is incorrect");
+        check(destination.loopType == 2 && destination.loopStart == 18 && destination.loopLength == 2,
+              "Loop markers used source rather than converted frame count");
+        check(destination.sixteenBit && destination.relativeNote == 0 && destination.finetune == 23 &&
+              destination.name == "Destination" && destination.volume == 37 && destination.panning == 81,
+              "Tuned paste failed depth promotion or changed destination metadata");
+
+        // An empty target still owns a tuning: do not silently adopt the clipboard rate.
+        brick::Sample empty;
+        empty.relativeNote = -24; empty.finetune = 23;
+        pastePcm(empty, {0, 0}, clip);
+        check(empty.pcm == std::vector<std::int16_t>(4, 4096) &&
+              empty.relativeNote == -24 && empty.finetune == 23,
+              "Empty destination did not retain tuning while downsampling");
+    });
+
+    test("PCM paste handles fractional tuning and retains eight-bit precision", [] {
+        using namespace brick::edit;
+        brick::Sample source;
+        source.sixteenBit = false; source.pcm.resize(1024);
+        for (std::size_t n = 0; n < source.pcm.size(); ++n)
+            source.pcm[n] = static_cast<std::int16_t>((int(n % 63) - 31) * 256);
+        const auto clip = copyPcm(source, wholeSample(source));
+        brick::Sample destination;
+        destination.sixteenBit = false; destination.finetune = 64;
+        pastePcm(destination, {0, 0}, clip);
+        check(destination.pcm.size() == 1054 && destination.relativeNote == 0 && destination.finetune == 64,
+              "Finetune-only difference was ignored or rounded incorrectly");
+        check(!destination.sixteenBit &&
+              std::all_of(destination.pcm.begin(), destination.pcm.end(),
+                          [](std::int16_t value) { return value % 256 == 0; }),
+              "Resampling produced noncanonical eight-bit PCM");
+        check(clip.pcm == source.pcm && clip.relativeNote == 0 && clip.finetune == 0,
+              "Conversion retuned or altered the clipboard");
+    });
+
+    test("44100 and 48000 Hz PCM paste retains audible duration and pitch", [] {
+        using namespace brick::edit;
+        const auto importedTone = [](std::uint32_t rate) {
+            std::vector<std::int16_t> stereo;
+            for (std::size_t n = 0; n < rate / 10; ++n) {
+                const auto value = static_cast<std::int16_t>(std::lround(
+                    12000.0 * std::sin(6.2831853071795864769 * 100.0 * double(n) / rate)));
+                stereo.push_back(value); stereo.push_back(value);
+            }
+            return brick::io::decodeWav(brick::io::encodeWav16(stereo, rate), true);
+        };
+        const auto effectiveRate = [](const brick::Sample& sample) {
+            return 8363.0 * std::exp2((int(sample.relativeNote) * 128 + int(sample.finetune)) / 1536.0);
+        };
+        for (const auto sourceRate : {44100u, 48000u}) {
+            const auto destinationRate = sourceRate == 44100u ? 48000u : 44100u;
+            const auto source = importedTone(sourceRate);
+            auto destination = importedTone(destinationRate);
+            const auto destinationNote = destination.relativeNote, destinationFine = destination.finetune;
+            destination.pcm.clear();
+            const auto clip = copyPcm(source, wholeSample(source));
+            pastePcm(destination, {0, 0}, clip);
+            const double sourceSeconds = double(source.pcm.size()) / effectiveRate(source);
+            const double destinationSeconds = double(destination.pcm.size()) / effectiveRate(destination);
+            check(std::abs(sourceSeconds - destinationSeconds) <= 0.501 / effectiveRate(destination),
+                  "Paste changed duration by more than one rounded destination frame");
+            check(std::abs(double(destination.pcm.size()) - destinationRate / 10.0) < 5.0,
+                  "44.1/48 kHz conversion retained the old frame count or used the inverse ratio");
+            // Count full positive-going periods in the interior, avoiding endpoint-filter transients.
+            std::size_t first = 0, last = 0, crossings = 0;
+            for (std::size_t n = 2; n + 2 < destination.pcm.size(); ++n)
+                if (destination.pcm[n - 1] < 0 && destination.pcm[n] >= 0) {
+                    if (!crossings) first = n;
+                    last = n; ++crossings;
+                }
+            check(crossings >= 8 && crossings <= 10, "Tuning conversion lost tone periods");
+            const double frequency = double(crossings - 1) * effectiveRate(destination) / double(last - first);
+            const double originalFrequency = 100.0 * effectiveRate(source) / sourceRate;
+            check(std::abs(frequency - originalFrequency) < 0.15,
+                  "Pasted tone does not retain its original playback pitch");
+            check(destination.relativeNote == destinationNote && destination.finetune == destinationFine &&
+                  clip.pcm == source.pcm, "Rate alignment changed destination tuning or clipboard");
+        }
+    });
+
+    test("PCM downsampling filters frequencies above the new Nyquist limit", [] {
+        using namespace brick::edit;
+        brick::Sample source;
+        source.pcm.resize(1024);
+        for (std::size_t n = 0; n < source.pcm.size(); ++n)
+            source.pcm[n] = n % 2 ? -16000 : 16000;
+        brick::Sample destination; destination.relativeNote = -12;
+        const auto inserted = pastePcm(destination, {0, 0}, copyPcm(source, wholeSample(source)));
+        check(inserted == 512 && destination.pcm.size() == 512,
+              "Octave-down insertion did not report its converted frame count");
+        // Plain decimation aliases this alternating signal into a loud DC value.
+        // Ignore clip edges, where the finite copied region truncates the filter.
+        check(std::all_of(destination.pcm.begin() + 32, destination.pcm.end() - 32,
+                          [](std::int16_t value) { return std::abs(int(value)) <= 8; }),
+              "Downsampling folded an inaudible source frequency into the output");
+    });
+
+    test("PCM resampling retains DC at single-frame and truncated endpoints", [] {
+        using namespace brick::edit;
+        for (const auto amplitude : {-32768, 32767}) {
+            brick::Sample source;
+            source.relativeNote = -36;
+            source.pcm = {static_cast<std::int16_t>(amplitude)};
+            const auto clip = copyPcm(source, wholeSample(source));
+            brick::Sample destination;
+            const auto inserted = pastePcm(destination, {0, 0}, clip);
+            check(inserted == 8 && destination.pcm == std::vector<std::int16_t>(8, amplitude),
+                  "One-frame upsampling lost DC level or produced invalid endpoint normalization");
+        }
+        brick::Sample source; source.pcm.assign(65, -11000);
+        for (const auto note : {-12, 12}) {
+            brick::Sample destination; destination.relativeNote = static_cast<std::int8_t>(note);
+            pastePcm(destination, {0, 0}, copyPcm(source, wholeSample(source)));
+            check(!destination.pcm.empty() &&
+                  std::all_of(destination.pcm.begin(), destination.pcm.end(),
+                              [](std::int16_t value) { return value == -11000; }),
+                  "Truncated resampling kernels changed a constant waveform at its endpoints");
+        }
+    });
+
+    test("PCM paste rejects impossible conversions without altering the sample", [] {
+        using namespace brick::edit;
+        brick::Sample destination;
+        destination.name = "Preserve"; destination.pcm = {256, 512, 768, 1024};
+        destination.sixteenBit = false; destination.relativeNote = -24;
+        destination.volume = 31; destination.panning = 47;
+        setSampleLoop(destination, 1, 1, 2);
+        brick::Sample source; source.pcm = {123};
+        auto clip = copyPcm(source, wholeSample(source));
+        rejects([&] { pastePcm(destination, {1, 2}, clip); }, "Conversion silently discarded a sub-frame clip");
+        const auto unchanged = [&] {
+            check(destination.pcm == std::vector<std::int16_t>({256, 512, 768, 1024}) &&
+                  !destination.sixteenBit && destination.name == "Preserve" &&
+                  destination.loopType == 1 && destination.loopStart == 1 && destination.loopLength == 2 &&
+                  destination.volume == 31 && destination.panning == 47 && destination.finetune == 0,
+                  "Rejected conversion partially changed sample data or metadata");
+        };
+        unchanged(); check(destination.relativeNote == -24, "Rejected conversion changed tuning");
+        destination.relativeNote = 127; source.relativeNote = -128; source.pcm.assign(16, 123);
+        clip = copyPcm(source, wholeSample(source));
+        rejects([&] { pastePcm(destination, {1, 2}, clip); }, "Oversized converted clipboard was accepted");
+        unchanged(); check(destination.relativeNote == 127, "Overflow rejection changed tuning");
+        destination.relativeNote = 0; clip.relativeNote = 0; clip.sixteenBit = false;
+        rejects([&] { pastePcm(destination, {1, 2}, clip); }, "Malformed eight-bit clipboard was accepted");
+        unchanged(); check(destination.relativeNote == 0, "Invalid clipboard rejection changed tuning");
     });
 
     test("sample insert-delete and reverse update loop geometry", [] {

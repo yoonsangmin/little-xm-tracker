@@ -1,6 +1,7 @@
 #include "model/EditOperations.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -43,6 +44,44 @@ std::int16_t quantize(double value, bool sixteenBit) {
     value = std::clamp(value, -32768.0, 32767.0);
     if (sixteenBit) return static_cast<std::int16_t>(std::lround(value));
     return static_cast<std::int16_t>(std::clamp(std::lround(value / 256.0), -128L, 127L) * 256);
+}
+void resampleClipboard(const PcmClip& clip, double ratio, bool sixteenBit,
+                       std::int16_t* destination, std::size_t frames) {
+    // Windowed sinc interpolation, with a lower cutoff when reducing the rate
+    // so frequencies above the destination Nyquist limit do not fold back.
+    // A small shared lookup avoids trig calls for every tap on the handheld.
+    constexpr int radius = 16, resolution = 512;
+    static const auto kernel = [] {
+        constexpr double pi = 3.14159265358979323846;
+        std::array<double, radius * resolution + 1> values{};
+        values[0] = 1.0;
+        for (std::size_t i = 1; i < values.size(); ++i) {
+            const double x = double(i) / resolution;
+            values[i] = std::sin(pi * x) / (pi * x) *
+                (0.5 + 0.5 * std::cos(pi * x / radius));
+        }
+        return values;
+    }();
+    const double cutoff = std::min(1.0, ratio);
+    const double support = radius / cutoff;
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+        const double position = double(frame) / ratio;
+        const auto first = static_cast<std::size_t>(std::max(0.0, std::ceil(position - support)));
+        const auto last = static_cast<std::size_t>(std::min(double(clip.pcm.size() - 1), std::floor(position + support)));
+        double value = 0.0, total = 0.0;
+        for (auto source = first; source <= last; ++source) {
+            const double distance = std::abs(double(source) - position) * cutoff * resolution;
+            if (distance >= radius * resolution) continue;
+            const auto index = static_cast<std::size_t>(distance);
+            const double fraction = distance - double(index);
+            const double weight = kernel[index] * (1.0 - fraction) + kernel[index + 1] * fraction;
+            value += double(clip.pcm[source]) * weight;
+            total += weight;
+        }
+        // Normalize the truncated kernel at the clip edges, retaining DC level
+        // without reading PCM outside the copied selection.
+        destination[frame] = quantize(value / total, sixteenBit);
+    }
 }
 void repairMarkers(Envelope& envelope) {
     require(envelope.count <= 12, "Envelope exceeds 12 points");
@@ -181,29 +220,40 @@ void transformSample(Sample& sample, FrameRange range, SampleTransform operation
 
 PcmClip copyPcm(const Sample& sample, FrameRange range) {
     checkRange(sample, range);
-    return {{sample.pcm.begin() + range.first, sample.pcm.begin() + range.last}, sample.sixteenBit};
+    return {{sample.pcm.begin() + range.first, sample.pcm.begin() + range.last},
+        sample.sixteenBit, sample.relativeNote, sample.finetune};
 }
 
-void pastePcm(Sample& sample, FrameRange replaced, const PcmClip& clip) {
+std::size_t pastePcm(Sample& sample, FrameRange replaced, const PcmClip& clip) {
     checkRange(sample, replaced, true);
     const auto retained = sample.pcm.size() - (replaced.last - replaced.first);
-    require(retained <= maxFrames && clip.pcm.size() <= maxFrames - retained, "Edited sample exceeds the 32M-frame memory limit");
+    require(retained <= maxFrames && clip.pcm.size() <= maxFrames, "Edited sample exceeds the 32M-frame memory limit");
     if (!clip.sixteenBit)
         for (const auto value : clip.pcm) require(value % 256 == 0, "Clipboard PCM does not match its eight-bit depth");
-    std::vector<std::int16_t> result;
-    result.reserve(retained + clip.pcm.size());
-    result.insert(result.end(), sample.pcm.begin(), sample.pcm.begin() + replaced.first);
-    result.insert(result.end(), clip.pcm.begin(), clip.pcm.end());
-    result.insert(result.end(), sample.pcm.begin() + replaced.last, sample.pcm.end());
+    const int tuningDifference = (int(sample.relativeNote) - int(clip.relativeNote)) * 128 +
+        int(sample.finetune) - int(clip.finetune);
+    const double ratio = std::exp2(double(tuningDifference) / 1536.0);
+    const double convertedSize = std::round(double(clip.pcm.size()) * ratio);
+    require(clip.pcm.empty() || convertedSize >= 1.0, "Tuning conversion would leave no PCM frames");
+    require(convertedSize <= double(maxFrames - retained), "Edited sample exceeds the 32M-frame memory limit");
+    const auto inserted = static_cast<std::size_t>(convertedSize);
+    std::vector<std::int16_t> result(retained + inserted);
+    std::copy(sample.pcm.begin(), sample.pcm.begin() + replaced.first, result.begin());
+    if (!tuningDifference)
+        std::copy(clip.pcm.begin(), clip.pcm.end(), result.begin() + replaced.first);
+    else if (inserted)
+        resampleClipboard(clip, ratio, sample.sixteenBit || clip.sixteenBit,
+            result.data() + replaced.first, inserted);
+    std::copy(sample.pcm.begin() + replaced.last, sample.pcm.end(), result.begin() + replaced.first + inserted);
     const auto relocateStart = [&](std::uint64_t position) {
         if (position < replaced.first) return position;
-        if (position >= replaced.last) return position - replaced.last + replaced.first + clip.pcm.size();
+        if (position >= replaced.last) return position - replaced.last + replaced.first + inserted;
         return std::uint64_t(replaced.first);
     };
     const auto relocateEnd = [&](std::uint64_t position) {
         if (position <= replaced.first) return position;
-        if (position >= replaced.last) return position - replaced.last + replaced.first + clip.pcm.size();
-        return std::uint64_t(replaced.first + clip.pcm.size());
+        if (position >= replaced.last) return position - replaced.last + replaced.first + inserted;
+        return std::uint64_t(replaced.first + inserted);
     };
     const auto start = std::min<std::uint64_t>(relocateStart(sample.loopStart), result.size());
     const auto end = std::clamp<std::uint64_t>(relocateEnd(std::uint64_t(sample.loopStart) + sample.loopLength), start, result.size());
@@ -212,6 +262,7 @@ void pastePcm(Sample& sample, FrameRange replaced, const PcmClip& clip) {
     sample.loopLength = static_cast<std::uint32_t>(end - start);
     if (!sample.loopLength) sample.loopType = 0;
     if (!clip.pcm.empty() && clip.sixteenBit) sample.sixteenBit = true;
+    return inserted;
 }
 
 void deletePcm(Sample& sample, FrameRange range) {

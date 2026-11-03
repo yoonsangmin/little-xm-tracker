@@ -298,7 +298,7 @@
         if(wavePresetOpen)refreshWavePreview();
     }
     void openWavePresets() {
-        // NEW WAVE owns only a creation candidate until CREATE opens DRAW.
+        // GENERATE owns only a creation candidate until CREATE opens DRAW.
         for(int n=0;n<5;++n) {
             const auto icon=makeWaveCandidate(n);
             wavePresetThumbnail(n,icon.pcm);
@@ -637,7 +637,7 @@
         const auto detail=waveNewDetail();
         const auto rows=waveNewRows();
         const int buttonY=274+int(rows.size()-2)*44+12;
-        drawToolPanel("NEW WAVE",buttonY+controlHeight,hints,detail);
+        drawToolPanel("GENERATE",buttonY+controlHeight,hints,detail);
         drawWavePreviewStatus();
         const auto preview=playback->samplePreviewStatus();
         for(int n=0;n<5;++n) {

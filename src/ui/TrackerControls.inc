@@ -174,8 +174,9 @@
     void pastePcmSelection() {
         if(!pcmClipboard)throw std::runtime_error("COPY PCM FIRST");
         const auto range=selectedFrames(false);
-        if(!pcmClipboard->pcm.empty()||range.last>range.first)mutate([&]{edit::pastePcm(editableSample(),range,*pcmClipboard);},"PASTE");
-        selectionEnd=selectionStart+int(pcmClipboard->pcm.size());normalize();clearSelection();notify("PCM PASTED");
+        std::size_t inserted=0;
+        if(!pcmClipboard->pcm.empty()||range.last>range.first)mutate([&]{inserted=edit::pastePcm(editableSample(),range,*pcmClipboard);},"PASTE");
+        selectionEnd=selectionStart+int(inserted);normalize();clearSelection();notify("PCM PASTED");
     }
     void pasteCurrent() {
         finishGesture();

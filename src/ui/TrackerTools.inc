@@ -132,7 +132,7 @@
         add(sampleTools,"SHOW WHOLE WAVEFORM","",[this]{waveformZoom=false;});
         add(sampleTools,"COPY PCM","COPY SELECTION; EMPTY SELECTION MEANS ALL",[this]{pcmClipboard=edit::copyPcm(*currentSampleChecked(),selectedFrames());notify("PCM COPIED");});
         add(sampleTools,"CUT PCM","COPY THEN DELETE SELECTED FRAMES",[this]{auto* s=currentSampleChecked();const auto range=selectedFrames();pcmClipboard=edit::copyPcm(*s,range);mutate([&]{edit::deletePcm(*s,range);},"CUT");selectionEnd=selectionStart;clearSelection();notify("PCM CUT / PROCESS > PASTE PCM");});
-        add(sampleTools,"PASTE PCM","REPLACE SELECTION OR INSERT AT ITS START",[this]{pastePcmSelection();});
+        add(sampleTools,"PASTE PCM","START = END: INSERT / RANGE: REPLACE",[this]{pastePcmSelection();});
         add(sampleTools,"DELETE PCM","DELETE SELECTED FRAMES; UNDO AVAILABLE",[this]{const auto range=selectedFrames();mutate([&]{edit::deletePcm(*currentSample(),range);});selectionEnd=selectionStart;});
         const std::array<std::pair<const char*,edit::SampleTransform>,7> transforms={{{"REVERSE",edit::SampleTransform::Reverse},{"NORMALIZE",edit::SampleTransform::Normalize},{"FADE IN",edit::SampleTransform::FadeIn},{"FADE OUT",edit::SampleTransform::FadeOut},{"SILENCE",edit::SampleTransform::Silence},{"INVERT POLARITY",edit::SampleTransform::Invert},{"REMOVE DC",edit::SampleTransform::RemoveDc}}};
         for(const auto& t:transforms)add(sampleTools,t.first,"APPLY TO SELECTION; EMPTY SELECTION MEANS ALL",[this,op=t.second]{transformPcm(op);});

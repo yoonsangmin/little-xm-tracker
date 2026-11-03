@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(little_xm_tracker VERSION 0.9.1 LANGUAGES CXX)
+project(little_xm_tracker VERSION 1.0.0 LANGUAGES CXX)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Little XM Tracker targets Linux / TrimUI Brick.")
