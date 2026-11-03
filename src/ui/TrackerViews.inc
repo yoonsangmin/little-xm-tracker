@@ -190,7 +190,6 @@
             const int left=x+8, right=x+cardWidth-9;
             const int top=y+32, bottom=y+cardHeight-9;
             const int center=(top+bottom)/2, amplitude=std::max(1,(bottom-top)/2);
-            line(left,center,right,center,dim);
             if (live) {
                 int lastX=left;
                 int lastY=center-int(state.waveform[0])*amplitude/32768;
