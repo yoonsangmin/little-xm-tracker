@@ -115,8 +115,8 @@
         auto* i=currentInstrument();
         rect(20,52,858,controlHeight,instrumentField==8?panel2:bg);
         if(instrumentField==8)rect(20,52,focusBarWidth,controlHeight,amber);
-        txt(34,52+controlTextY,"NAME",instrumentField==8?amber:muted);
-        txt(112,52+controlTextY,i?ui::fit(text::xmDisplayText(i->name),62):"EMPTY INSTRUMENT",ink);
+        txt(34,52+controlTextY,"NAME",instrumentField==8?ink:muted);
+        txt(112,52+controlTextY,i?ui::fit(text::xmDisplayText(i->name),62):"EMPTY INSTRUMENT",instrumentField==8?amber:cyan);
         drawButton(886,52,118,"LOAD",instrumentField==9);
         rect(20,104,326,616,panel);txt(32,116,"SLOT  NAME",muted);
         for(int n=0;n<16;++n) {

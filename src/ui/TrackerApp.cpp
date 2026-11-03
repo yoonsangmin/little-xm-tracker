@@ -1235,8 +1235,8 @@ struct TrackerApp::Impl {
         auto* s=currentSample();
         rect(20,52,732,controlHeight,sampleField==9?panel2:bg);
         if(sampleField==9)rect(20,52,focusBarWidth,controlHeight,amber);
-        txt(34,52+controlTextY,"NAME",sampleField==9?amber:muted);
-        txt(112,52+controlTextY,s?ui::fit(text::xmDisplayText(s->name),52):"EMPTY SAMPLE",ink);
+        txt(34,52+controlTextY,"NAME",sampleField==9?ink:muted);
+        txt(112,52+controlTextY,s?ui::fit(text::xmDisplayText(s->name),52):"EMPTY SAMPLE",sampleField==9?amber:cyan);
         drawButton(760,52,118,"LOAD",sampleField==10);
         drawButton(886,52,118,"GENERATE",sampleField==11);
         Sample empty;if(!s)s=&empty;
