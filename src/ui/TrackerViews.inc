@@ -360,7 +360,7 @@
                 "Mapped sample - Sample played by this key", "Fadeout - Volume decrease after key off",
                 "Vibrato depth - Automatic pitch modulation amount", "Vibrato rate - Automatic pitch modulation speed",
                 "Vibrato type - Automatic vibrato waveform", "Vibrato sweep - Time to reach full depth",
-                "Name - Rename this instrument", "Load XI - Replace this instrument",
+                "Name - Rename this instrument", "Load - Import an XI instrument",
                 "Volume envelope - Edit points", "Panning envelope - Edit points",
                 "Key map - Edit note-to-sample assignments", "Sample - A opens editor / A+B deletes this slot",
                 "Key map - A+DPAD changes this note's sample"};

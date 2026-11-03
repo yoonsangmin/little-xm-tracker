@@ -47,6 +47,7 @@
             };
 
             resetSampleLayout();selectionStart=200;selectionEnd=600;
+            noticeUntil=0;draw();screenshot(home/"sample-layout-name.bmp");SDL_RenderPresent(renderer);
             const auto layoutBefore=io::encodeXm(doc);const auto layoutRevision=documentRevision,layoutRecovery=recoverySerial;
             tap(Button::Up);tap(Button::Left);require(sampleField==9,"Sample Name clamps at the top-left edge");
             tap(Button::Right);require(sampleField==10,"Name and Load share the Sample top row");

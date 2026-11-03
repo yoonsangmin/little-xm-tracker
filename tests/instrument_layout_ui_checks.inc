@@ -80,7 +80,7 @@
             };
             auto drawLayout=[&]{noticeUntil=0;draw();};
             instrumentField=8;sample=0;drawLayout();
-            renderedText({112,52+controlTextY,750,16},"FIRST OWNER",amber,panel2);
+            renderedText({112,52+controlTextY,750,16},"FIRST OWNER",ink,panel2);
             renderedText({921,52+controlTextY,48,16},"LOAD",cyan,bg);
             renderedText({903,188+controlTextY,84,16},"KEY MAP",cyan,bg);
             renderedText({840,188+controlTextY,24,16},"05",cyan,panel);
