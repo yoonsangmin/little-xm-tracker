@@ -15,6 +15,7 @@
             int waveViewWidth=0,waveViewHeight=0;SDL_GetRendererOutputSize(renderer,&waveViewWidth,&waveViewHeight);
             const bool waveNative=waveViewWidth==W&&waveViewHeight==H;
             const auto waveInk=(std::uint32_t(cyan.r)<<16)|(std::uint32_t(cyan.g)<<8)|cyan.b;
+            const auto selectedWaveInk=(std::uint32_t(ink.r)<<16)|(std::uint32_t(ink.g)<<8)|ink.b;
             auto readWavePixels=[&](SDL_Rect bounds){
                 std::vector<std::uint32_t> pixels(std::size_t(bounds.w)*std::size_t(bounds.h));
                 require(SDL_RenderReadPixels(renderer,&bounds,SDL_PIXELFORMAT_ARGB8888,pixels.data(),bounds.w*int(sizeof(std::uint32_t)))==0,
@@ -22,11 +23,12 @@
                 return pixels;
             };
             const SDL_Rect sampleGraph{30,103,965,285};
-            auto sampleInkAt=[&](const auto& pixels,int x,int y,int tolerance=0){
+            auto sampleInkAt=[&](const auto& pixels,int x,int y,int tolerance=0,bool selected=false){
                 for(int offset=-tolerance;offset<=tolerance;++offset) {
                     const int yy=y+offset-sampleGraph.y;
                     if(x>=sampleGraph.x&&x<sampleGraph.x+sampleGraph.w&&yy>=0&&yy<sampleGraph.h&&
-                       (pixels[std::size_t(yy)*sampleGraph.w+std::size_t(x-sampleGraph.x)]&0xffffffu)==waveInk)return true;
+                       (pixels[std::size_t(yy)*sampleGraph.w+std::size_t(x-sampleGraph.x)]&0xffffffu)==
+                           (selected?selectedWaveInk:waveInk))return true;
                 }
                 return false;
             };
@@ -51,12 +53,20 @@
                 require(sampleInkAt(pixels,30,212)&&sampleInkAt(pixels,512,212)&&sampleInkAt(pixels,993,212),
                         "a one-frame sample remains visible across the entire sample view");
             }
-            setViewedPcm({-32768,-16384,16384,32767});selectionStart=1;selectionEnd=3;waveformZoom=true;
+            setViewedPcm({-32768,-16384,16384,32767});selectionStart=1;selectionEnd=3;
             const auto zoomPcm=currentSample()->pcm;draw();
             if(waveNative) {
                 const auto pixels=readWavePixels(sampleGraph);
-                require(sampleInkAt(pixels,271,245,1)&&sampleInkAt(pixels,753,179),
-                        "selection zoom connects only its included frames and holds its own final frame");
+                require(sampleInkAt(pixels,271,311,1,true)&&sampleInkAt(pixels,391,245,1,true)&&
+                        sampleInkAt(pixels,150,344,1)&&sampleInkAt(pixels,753,114,1),
+                        "Connected PCM uses text color only inside the selected columns, retaining accent outside");
+            }
+            screenshot(home/"wave-sample-selection-connected.bmp");SDL_RenderPresent(renderer);
+            waveformZoom=true;draw();
+            if(waveNative) {
+                const auto pixels=readWavePixels(sampleGraph);
+                require(sampleInkAt(pixels,271,245,1,true)&&sampleInkAt(pixels,753,179,0,true),
+                        "Selection zoom highlights its connected frames and held final frame in text color");
             }
             require(currentSample()->pcm==zoomPcm,"selection zoom preserves PCM outside and inside the view");
             setViewedPcm(std::vector<std::int16_t>(1928,0));currentSample()->pcm[1001]=32767;draw();
@@ -65,6 +75,14 @@
                 require(sampleInkAt(pixels,530,114)&&sampleInkAt(pixels,530,244)&&!sampleInkAt(pixels,529,114),
                         "the long-waveform min/max overview retains a single-frame spike without spreading it into adjacent bins");
             }
+            const auto spikePcm=currentSample()->pcm;selectionStart=1000;selectionEnd=1002;draw();
+            if(waveNative) {
+                const auto pixels=readWavePixels(sampleGraph);
+                require(sampleInkAt(pixels,530,114,0,true)&&sampleInkAt(pixels,530,244,0,true)&&
+                        sampleInkAt(pixels,529,245)&&sampleInkAt(pixels,531,245),
+                        "Min/max PCM columns brighten only within the selection and retain outside waveform color");
+            }
+            require(currentSample()->pcm==spikePcm,"Selection waveform highlighting never modifies stored PCM");
 
             setViewedPcm(std::vector<std::int16_t>(64,0));
             edit::fillWavePreset(*currentSample(),{0,64},edit::WavePreset::Sine,16384);

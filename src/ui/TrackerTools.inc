@@ -430,7 +430,7 @@
         drawToolPanel(envelopePan?"PANNING ENVELOPE":"VOLUME ENVELOPE",584+controlHeight,hints);const auto& e=currentEnvelope();
         const auto preview=playback->instrumentPreviewStatus();
         const int playbackTick=preview.active&&preview.instrument==instrument?(envelopePan?preview.panningTick:preview.volumeTick):-1;
-        envelope(85,150,530,220,e,playbackTick);
+        envelope(85,150,530,220,e,playbackTick,envelopeField);
         if(e.count){const int maxX=std::max(1,int(e.points[e.count-1].x));const auto& p=e.points[std::size_t(envelopePoint)];outline(85+int(p.x)*522/maxX-5,150+214-int(p.y)*210/64-5,11,11,amber);}
         txt(85,392,"PT   TICK   VALUE",muted);
         for(int n=0;n<e.count;++n){const int col=n/6,r=n%6;txt(85+col*268,424+r*31,hex(n)+"   "+hex(e.points[n].x,4)+"   "+hex(e.points[n].y),n==envelopePoint?amber:ink);}

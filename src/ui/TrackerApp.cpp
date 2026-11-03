@@ -1202,10 +1202,26 @@ struct TrackerApp::Impl {
     }
 #include "ui/TrackerViews.inc"
 
-    void envelope(int x,int y,int width,int height,const Envelope& e,int playbackTick=-1) {
+    void rangeBoundary(int x,int top,int bottom,bool focused,bool selected) {
+        const auto color=focused?(selected?amber:ink):dim;
+        line(x,top,x,bottom,color);
+        if(focused)rect(x-2,top,5,5,color);
+    }
+    void envelope(int x,int y,int width,int height,const Envelope& e,int playbackTick=-1,int loopField=-1) {
         rect(x,y,width,height,bg);line(x,y+height-1,x+width,y+height-1,dim);
         if(!e.count){txt(x+12,y+height/2-7,"NO ENVELOPE",dim);return;}
         const int maxX=std::max(1,int(e.points[e.count-1].x));
+        const bool loopFocus=loopField>=6&&loopField<=8;
+        if(((e.flags&4)||loopFocus)&&e.loopStart<e.count&&e.loopEnd<e.count&&e.loopStart<=e.loopEnd) {
+            const std::array<int,2> points{{e.loopStart,e.loopEnd}};
+            for(int i=0;i<2;++i) {
+                // A selected endpoint stays visible even when both points have
+                // the same tick, or map to the same pixel in a small preview.
+                const int n=loopField==7?1-i:i;
+                const int px=x+int(e.points[std::size_t(points[n])].x)*(width-8)/maxX;
+                rangeBoundary(px,y,y+height-1,loopFocus,loopField==7+n);
+            }
+        }
         for(int i=0;i<e.count;++i){int px=x+int(e.points[i].x)*(width-8)/maxX,py=y+height-6-int(e.points[i].y)*(height-10)/64;
             if(i){int ax=x+int(e.points[i-1].x)*(width-8)/maxX,ay=y+height-6-int(e.points[i-1].y)*(height-10)/64;line(ax,ay,px,py,cyan);}
             rect(px-2,py-2,5,5,i==e.sustain?amber:cyan);
@@ -1224,60 +1240,102 @@ struct TrackerApp::Impl {
         drawButton(760,52,118,"LOAD",sampleField==10);
         drawButton(886,52,118,"GENERATE",sampleField==11);
         Sample empty;if(!s)s=&empty;
-        const int x=30,y=103,ww=964,hh=284;rect(20,96,984,302,panel);
+        const int x=30,y=103,ww=964,hh=284;
+        const int rangeTop=96,rangeHeight=302,rangeBottom=rangeTop+rangeHeight-1;
+        rect(20,rangeTop,984,rangeHeight,panel);
         line(x,y+hh/2,x+ww,y+hh/2,dim);
         if(!s->pcm.empty()){
             const std::size_t firstFrame=waveformZoom&&selectionEnd>selectionStart?std::size_t(selectionStart):0;
             const std::size_t lastFrame=waveformZoom&&selectionEnd>selectionStart?std::size_t(selectionEnd):s->pcm.size();
             const auto visibleFrames=lastFrame-firstFrame;
             auto frameX=[&](std::size_t f){const auto clipped=std::clamp(f,firstFrame,lastFrame);return x+int((clipped-firstFrame)*std::size_t(ww)/visibleFrames);};
-            if(selectionEnd>selectionStart)rect(frameX(selectionStart),y,std::max(1,frameX(selectionEnd)-frameX(selectionStart)),hh,sampleSelectionColor);
-            if(visibleFrames<=std::size_t(ww)) {
-                // At this zoom, connect actual PCM points on the same time axis
-                // as selection/loop boundaries; isolated min/max pixels look dashed.
-                const auto frameY=[&](std::size_t frame){return y+hh/2-int(s->pcm[frame])*(hh/2-10)/32768;};
-                for(std::size_t frame=firstFrame;frame+1<lastFrame;++frame)
-                    line(frameX(frame),frameY(frame),frameX(frame+1),frameY(frame+1),cyan);
-                // Hold the final sample to the end boundary, also covering a
-                // one-frame view. Do not invent a transition across the loop.
-                line(frameX(lastFrame-1),frameY(lastFrame-1),frameX(lastFrame),frameY(lastFrame-1),cyan);
-            } else {
-                if(waveformRevision!=documentRevision||waveformInstrument!=instrument||waveformSample!=sample||waveformFirst!=firstFrame||waveformLast!=lastFrame){
-                    for(int px=0;px<ww;++px){const auto a=firstFrame+std::size_t(px)*visibleFrames/std::size_t(ww);const auto b=std::min(lastFrame,std::max(a+1,firstFrame+std::size_t(px+1)*visibleFrames/std::size_t(ww)));const auto mm=std::minmax_element(s->pcm.begin()+a,s->pcm.begin()+b);waveform[std::size_t(px)]={*mm.first,*mm.second};}
-                    waveformRevision=documentRevision;waveformInstrument=instrument;waveformSample=sample;waveformFirst=firstFrame;waveformLast=lastFrame;
-                }
-                for(int px=0;px<ww;++px){const auto mm=waveform[std::size_t(px)];
-                    line(x+px,y+hh/2-int(mm.second)*(hh/2-10)/32768,x+px,y+hh/2-int(mm.first)*(hh/2-10)/32768,cyan);
-                }
-            }
             const bool loopFocus=sampleField>=4&&sampleField<=6;
             const bool selectionFocus=sampleField==7||sampleField==8||sampleField==12||sampleField==14;
+            const bool showLoop=s->loopLength&&(s->loopType||loopFocus);
+            const auto preview=playback->samplePreviewStatus();
+            const bool showPreview=preview.active&&preview.instrument==instrument&&preview.sample==sample&&
+                preview.frame>=firstFrame&&preview.frame<lastFrame;
+            if(selectionEnd>selectionStart) {
+                int left=frameX(selectionStart),right=std::max(left+1,frameX(selectionEnd));
+                auto visibleMarker=[&](std::size_t frame,bool shown){
+                    return shown&&frame>=firstFrame&&frame<=lastFrame?frameX(frame):-1;
+                };
+                const std::array<int,5> bars{{
+                    visibleMarker(s->loopStart,showLoop),
+                    visibleMarker(std::size_t(s->loopStart)+s->loopLength,showLoop),
+                    visibleMarker(selectionStart,selectionFocus),visibleMarker(selectionEnd,selectionFocus),
+                    visibleMarker(preview.frame,showPreview)}};
+                auto hasBackgroundColumn=[&]{
+                    if(right-left>int(bars.size()))return true;
+                    for(int px=left;px<right;++px)
+                        if(std::find(bars.begin(),bars.end(),px)==bars.end())return true;
+                    return false;
+                };
+                // Subpixel selections must retain one background column even
+                // under coincident bars. Expand only the display, within the
+                // plot; the selected PCM frames and boundary positions stay put.
+                while(!hasBackgroundColumn()) {
+                    if(right<x+ww)++right;
+                    else if(left>x)--left;
+                    else break;
+                }
+                rect(left,rangeTop,right-left,rangeHeight,sampleSelectionColor);
+            }
+            auto drawWaveform=[&](SDL_Color color){
+                if(visibleFrames<=std::size_t(ww)) {
+                    // At this zoom, connect actual PCM points on the same time axis
+                    // as selection/loop boundaries; isolated min/max pixels look dashed.
+                    const auto frameY=[&](std::size_t frame){return y+hh/2-int(s->pcm[frame])*(hh/2-10)/32768;};
+                    for(std::size_t frame=firstFrame;frame+1<lastFrame;++frame)
+                        line(frameX(frame),frameY(frame),frameX(frame+1),frameY(frame+1),color);
+                    // Hold the final sample to the end boundary, also covering a
+                    // one-frame view. Do not invent a transition across the loop.
+                    line(frameX(lastFrame-1),frameY(lastFrame-1),frameX(lastFrame),frameY(lastFrame-1),color);
+                } else {
+                    if(waveformRevision!=documentRevision||waveformInstrument!=instrument||waveformSample!=sample||waveformFirst!=firstFrame||waveformLast!=lastFrame){
+                        for(int px=0;px<ww;++px){const auto a=firstFrame+std::size_t(px)*visibleFrames/std::size_t(ww);const auto b=std::min(lastFrame,std::max(a+1,firstFrame+std::size_t(px+1)*visibleFrames/std::size_t(ww)));const auto mm=std::minmax_element(s->pcm.begin()+a,s->pcm.begin()+b);waveform[std::size_t(px)]={*mm.first,*mm.second};}
+                        waveformRevision=documentRevision;waveformInstrument=instrument;waveformSample=sample;waveformFirst=firstFrame;waveformLast=lastFrame;
+                    }
+                    for(int px=0;px<ww;++px){const auto mm=waveform[std::size_t(px)];
+                        line(x+px,y+hh/2-int(mm.second)*(hh/2-10)/32768,x+px,y+hh/2-int(mm.first)*(hh/2-10)/32768,color);
+                    }
+                }
+            };
+            drawWaveform(cyan);
+            if(selectionEnd>selectionStart) {
+                // Recolor only the selected time span, preserving the same PCM
+                // curve and using the theme's text color without blending.
+                const int left=frameX(selectionStart),right=std::max(left+1,frameX(selectionEnd));
+                SDL_Rect selectedClip{left,rangeTop,right-left,rangeHeight},previousClip{};
+                const bool hadClip=SDL_RenderIsClipEnabled(renderer)==SDL_TRUE;
+                SDL_RenderGetClipRect(renderer,&previousClip);
+                if(!hadClip||SDL_IntersectRect(&selectedClip,&previousClip,&selectedClip)) {
+                    SDL_RenderSetClipRect(renderer,&selectedClip);
+                    drawWaveform(ink);
+                }
+                SDL_RenderSetClipRect(renderer,hadClip?&previousClip:nullptr);
+            }
             auto markers=[&](std::size_t first,std::size_t last,bool focused,int firstField,int lastField){
                 const std::array<std::size_t,2> frames{{first,last}};
                 const std::array<int,2> fields{{firstField,lastField}};
-                for(int n=0;n<2;++n)if(frames[n]>=firstFrame&&frames[n]<=lastFrame){
-                    const auto color=focused?(sampleField==fields[n]?amber:ink):dim;
-                    const int px=frameX(frames[n]);line(px,y,px,y+hh,color);
-                    if(focused)rect(px-2,y,5,5,color);
+                for(int i=0;i<2;++i){
+                    const int n=focused&&sampleField==firstField?1-i:i;
+                    if(frames[n]>=firstFrame&&frames[n]<=lastFrame)
+                        rangeBoundary(frameX(frames[n]),rangeTop,rangeBottom,focused,sampleField==fields[n]);
                 }
             };
-            auto loopMarkers=[&]{if(s->loopLength&&(s->loopType||loopFocus))markers(s->loopStart,std::uint64_t(s->loopStart)+s->loopLength,loopFocus,5,6);};
+            auto loopMarkers=[&]{if(showLoop)markers(s->loopStart,std::uint64_t(s->loopStart)+s->loopLength,loopFocus,5,6);};
             auto selectionMarkers=[&]{
-                if(selectionEnd>selectionStart)markers(selectionStart,selectionEnd,selectionFocus,7,8);
-                else if(selectionFocus||selectionStart>0) {
-                    const int px=frameX(selectionStart);const auto color=selectionFocus?amber:dim;
-                    line(px,y,px,y+hh,color);
-                    if(selectionFocus)rect(px-2,y,5,5,color);
-                }
+                if(!selectionFocus)return;
+                if(selectionEnd>selectionStart)markers(selectionStart,selectionEnd,true,7,8);
+                else rangeBoundary(frameX(selectionStart),rangeTop,rangeBottom,true,true);
             };
             // Keep the range currently being edited visible when boundaries overlap.
             if(loopFocus){selectionMarkers();loopMarkers();}else{loopMarkers();selectionMarkers();}
-            const auto preview=playback->samplePreviewStatus();
-            if(preview.active&&preview.instrument==instrument&&preview.sample==sample&&
-                preview.frame>=firstFrame&&preview.frame<lastFrame) {
+            if(showPreview) {
                 const int cursorX=frameX(preview.frame);
-                line(cursorX,y,cursorX,y+hh,ink);
-                rect(cursorX-2,y+hh-4,5,5,ink);
+                line(cursorX,rangeTop,cursorX,rangeBottom,ink);
+                rect(cursorX-2,rangeBottom-4,5,5,ink);
             }
         }
         txt(30,410,number(int(s->pcm.size()))+" FRAMES  /  "+(s->sixteenBit?"16-BIT":"8-BIT")+" MONO",muted);
@@ -1759,6 +1817,7 @@ struct TrackerApp::Impl {
 #include "../../tests/keymap_edit_ui_checks.inc"
 #include "../../tests/brick_feedback_ui_checks.inc"
 #include "../../tests/waveform_view_ui_checks.inc"
+#include "../../tests/range_marker_ui_checks.inc"
 #include "../../tests/wave_preview_ui_checks.inc"
 #include "../../tests/wave_synth_ui_checks.inc"
         changePage(Page::Pattern);draw();
