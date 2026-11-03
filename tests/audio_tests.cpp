@@ -221,6 +221,97 @@ void instrumentEnvelopeCompletion() {
     }
 }
 
+void songMonitorEnvelopeCompletion() {
+    using namespace brick;
+    for (const int rate : {44100, 48000}) {
+        auto document = fixture();
+        auto& pattern = document.patterns[0];
+        pattern.at(0, 0, document.channels) = {49, 1, 0x50, 0, 0};
+        auto& env = document.instruments[0].volumeEnvelope;
+        env.flags = 1; env.count = 2;
+        env.points[0] = {0, 64}; env.points[1] = {4, 0};
+        Playback player({rate, Interpolation::Linear}), reference({rate, Interpolation::Linear});
+        auto start = [&] {
+            player.load(document); reference.load(document);
+            player.playSong(); reference.playSong();
+        };
+        auto pull = [&](std::size_t frames) {
+            const auto pcm = read(player, frames);
+            require(pcm == read(reference, frames), "Song monitor queries never change rendered PCM or its timing");
+            return pcm;
+        };
+        auto voice = [&] { return player.monitor().channels[0]; };
+        auto ended = [&] {
+            const auto state = voice();
+            return !state.active && state.note == 0 && state.peak == 0 &&
+                std::all_of(state.waveform.begin(), state.waveform.end(), [](auto value) { return value == 0; });
+        };
+        start();
+        require(audible(pull(rate / 25)) && voice().active && voice().note == 49,
+                "Song monitor retains the note while its volume envelope is audibly decaying");
+        pull(rate / 4);
+        require(ended() && player.status().playing,
+                "A terminal-zero envelope clears the monitor note and waveform without stopping the song");
+        const auto before = player.status();
+        for (int n = 0; n < 50; ++n) require(ended(), "A finished envelope stays absent across monitor reads");
+        require(player.status().row == before.row && player.status().elapsedSeconds == before.elapsedSeconds &&
+                !audible(pull(rate / 20)), "Reading a finished voice neither advances transport nor restores its sound");
+
+        // Clearing a display must not destroy the live core voice or its note:
+        // L00 can move the same envelope back to its attack before a new note.
+        pattern.at(4, 0, document.channels) = {0, 0, 0, 0x15, 0};
+        pattern.at(6, 0, document.channels) = {53, 1, 0x50, 0, 0};
+        start();pull(rate / 4);require(ended(), "Envelope reaches silence before the later L00 command");
+        // Read inside the revived attack, not exactly on its tick boundary:
+        // output packets at 44.1 and 48 kHz can straddle that boundary differently.
+        require(audible(pull(rate * 29 / 100)) && voice().active && voice().note == 49,
+                "L00 revives a completed envelope with its original monitor note");
+        pull(rate * 11 / 100);require(ended(), "The repositioned envelope can finish again");
+        require(audible(pull(rate * 13 / 100)) && voice().active && voice().note == 53,
+                "A later note replaces the completed monitor voice and starts a fresh envelope");
+        pattern.at(4, 0, document.channels) = {};
+        pattern.at(6, 0, document.channels) = {};
+
+        env.count = 7;
+        env.points[0] = {0, 0}; env.points[1] = {4, 0}; env.points[2] = {6, 64};
+        env.points[3] = {8, 0}; env.points[4] = {20, 0}; env.points[5] = {24, 64}; env.points[6] = {28, 0};
+        start();
+        require(!audible(pull(rate / 20)) && voice().active && voice().note == 49,
+                "An initial silent envelope section is not a completed monitor voice");
+        require(audible(pull(rate / 5)), "The song envelope attacks after its initial silence");
+        require(!audible(pull(rate / 10)) && voice().active,
+                "An intermediate envelope rest retains the monitor voice for its later attack");
+        require(audible(pull(rate * 3 / 20)) && voice().active,
+                "The same monitored voice resumes after an intermediate envelope rest");
+        pull(rate / 5);require(ended(), "Only the final zero clears the monitor after both attacks");
+
+        env.flags = 5; env.count = 2; env.loopStart = 0; env.loopEnd = 1;
+        env.points[0] = {0, 64}; env.points[1] = {4, 0};
+        start();pull(rate / 2);
+        require(voice().active && voice().note == 49 && audible(pull(rate / 5)),
+                "An envelope loop ending at zero retains its monitor note and repeats audibly");
+
+        env.flags = 3; env.count = 4; env.sustain = 1;
+        env.points[0] = {0, 64}; env.points[1] = {2, 0}; env.points[2] = {4, 64}; env.points[3] = {8, 0};
+        start();pull(rate / 2);
+        require(voice().active && voice().note == 49 && !audible(pull(rate / 10)),
+                "A silent sustain keeps its monitor identity until key-off releases it");
+        pattern.at(2, 0, document.channels) = {97, 0, 0, 0, 0};
+        start();pull(rate / 5);
+        require(voice().active && audible(pull(rate * 13 / 100)),
+                "Key-off can release a silent sustain into its later audible envelope points");
+        pull(rate / 5);require(ended(), "A released sustain clears the monitor after its final zero");
+        pattern.at(2, 0, document.channels) = {};
+
+        env.flags = 1; env.count = 2; env.points[0] = {0, 64}; env.points[1] = {4, 24};
+        start();pull(rate / 2);
+        require(voice().active && audible(pull(rate / 10)), "A completed nonzero envelope remains audible and monitored");
+        env.flags = 0; env.points[1] = {4, 0};
+        start();pull(rate / 2);
+        require(voice().active && audible(pull(rate / 10)), "A disabled envelope does not end the monitor voice");
+    }
+}
+
 void instrumentPreviewPlayheads() {
     using namespace brick;
     const auto inactive = [](const InstrumentPreviewStatus& value) {
@@ -1417,6 +1508,7 @@ int main() {
         playbackAndAudition();
         previewActivity();
         instrumentEnvelopeCompletion();
+        songMonitorEnvelopeCompletion();
         instrumentPreviewPlayheads();
         samplePreviewPlayhead();
         draftSampleAudition();

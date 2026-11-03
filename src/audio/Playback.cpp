@@ -36,6 +36,26 @@ public:
         };
         return {true, int(channel.ins), tick(channel.venv), tick(channel.penv)};
     }
+    static bool volumeEnvelopeFinished(PlayerSTD& player, int index) {
+        if (!player.chninfo) return false;
+        const auto& channel = player.chninfo[index];
+        const auto& envelope = channel.venv;
+        const auto* shape = envelope.envstruc;
+        if (!shape || !(shape->type & 1) || !shape->num) return false;
+        // A held sustain or an active loop can remain at/revisit zero without
+        // ending the note. Match upstream's key-off exit from a loop whose
+        // end is also the enabled sustain point.
+        if ((shape->type & 2) && channel.keyon) return false;
+        const bool looping = (shape->type & 4) && (!(shape->type & 8) || channel.keyon) &&
+            !(!channel.keyon && (shape->type & 2) && shape->sustain == shape->loope);
+        if (looping) return false;
+        const auto last = shape->num - 1;
+        // The clock advances after gain is applied. Checking the mixer too
+        // avoids hiding the final audible tick. This is display state only:
+        // Lxx, retriggers or live edits can still revive the existing voice.
+        return shape->env[last][1] == 0 && envelope.step >= shape->env[last][0] &&
+            player.getVol(index) == 0;
+    }
 };
 
 namespace brick {
@@ -1201,7 +1221,8 @@ PlaybackMonitor Playback::monitor() const {
     for (int index = 0; index < result.channelCount; ++index) {
         auto& output = result.channels[static_cast<std::size_t>(index)];
         output.muted = song.isChannelMuted(index);
-        output.active = playing && song.isChannelPlaying(index);
+        output.active = playing && song.isChannelPlaying(index) &&
+            !PlayerStatusTracker::volumeEnvelopeFinished(song, index);
         if (!output.active) continue;
         TPlayerChannelInfo info{};
         song.grabChannelInfo(index, info);

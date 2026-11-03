@@ -199,7 +199,7 @@
                     line(lastX,lastY,px,py,cyan);
                     lastX=px;lastY=py;
                 }
-            }
+            } else line(left,center,right,center,dim);
         }
     }
 
